@@ -79,7 +79,7 @@ variable "image_tag" {
 variable "container_cpu_architecture" {
   description = "CPU architecture for ECS tasks. Valid values are X86_64 and ARM64."
   type        = string
-  default     = "X86_64"
+  default     = "ARM64"
 
   validation {
     condition     = contains(["X86_64", "ARM64"], var.container_cpu_architecture)
