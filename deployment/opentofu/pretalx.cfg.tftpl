@@ -1,0 +1,37 @@
+[filesystem]
+data = /data
+logs = /data/logs
+media = /public/media
+static = /public/static
+
+[site]
+debug = False
+url = ${site_url}
+
+[database]
+backend = postgresql
+name = ${db_name}
+user = ${db_user}
+password = ${db_password}
+host = ${db_host}
+port = 5432
+
+[mail]
+from = ${smtp_from}
+host = ${smtp_host}
+port = ${smtp_port}
+user = ${smtp_user}
+password = ${smtp_password}
+tls = ${smtp_tls}
+
+[redis]
+location = redis://:${redis_auth_token}@${redis_host}:6379/0
+sessions = true
+
+[celery]
+backend = redis://:${redis_auth_token}@${redis_host}:6379/1
+broker = redis://:${redis_auth_token}@${redis_host}:6379/2
+%{ if extra_config != "" ~}
+
+${extra_config}
+%{ endif ~}

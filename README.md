@@ -45,7 +45,19 @@ outdated. Please make sure you read the files before executing them, and check t
 
 ## Updates with docker-compose
 
-* Run ``docker-compose stop``, ``docker-compose pull`` and finally ``docker-compose up -d`` to upgrade to the newest version. 
+* Run ``docker-compose stop``, ``docker-compose pull`` and finally ``docker-compose up -d`` to upgrade to the newest version.
+
+## AWS deployment
+
+* For an AWS production guide based on EC2 and Docker Compose, see [AWS-DEPLOYMENT.md](AWS-DEPLOYMENT.md).
+
+## Backups
+
+In addition to the database (``pretalx-database`` volume), make sure you back up the ``pretalx-data`` volume: it holds
+user-uploaded files (speaker avatars, uploaded slides, etc.) and the instance's ``.secret`` file used to derive the
+Django ``SECRET_KEY``. Losing the data volume means losing uploaded content and invalidating all signed values
+(sessions, password-reset tokens, etc.). The ``pretalx-public`` volume holds regenerable static/media output and does
+not need to be backed up.
 
 ## Other installations
 
