@@ -49,14 +49,19 @@ locals {
     db_password      = local.db_password
     db_host          = aws_db_instance.postgres.address
     smtp_from        = var.smtp_from
-    smtp_host        = var.smtp_host
+    smtp_host        = local.smtp_host
     smtp_port        = var.smtp_port
-    smtp_user        = var.smtp_user
-    smtp_password    = var.smtp_password
+    smtp_user        = local.smtp_user
+    smtp_password    = local.smtp_password
     smtp_tls         = var.smtp_tls ? "True" : "False"
     redis_auth_token = local.redis_auth_token
     redis_host       = aws_elasticache_replication_group.redis.primary_endpoint_address
     extra_config     = trimspace(var.extra_pretalx_config)
+    pretix_sso = var.pretix_sso_issuer == "" ? null : {
+      issuer        = var.pretix_sso_issuer
+      client_id     = var.pretix_sso_client_id
+      client_secret = var.pretix_sso_client_secret
+    }
   })
 
   common_mount_points = [
@@ -587,6 +592,7 @@ resource "aws_ecs_task_definition" "web" {
         { name = "GUNICORN_FORWARDED_ALLOW_IPS", value = "*" },
         { name = "AUTOMIGRATE", value = "yes" },
         { name = "AUTOREBUILD", value = "yes" },
+        { name = "PYTHONUNBUFFERED", value = "1" },
       ]
       mountPoints = local.common_mount_points
       logConfiguration = {
@@ -704,6 +710,7 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },
         { name = "AUTOMIGRATE", value = "no" },
         { name = "AUTOREBUILD", value = "no" },
+        { name = "PYTHONUNBUFFERED", value = "1" },
       ]
       mountPoints = local.common_mount_points
       logConfiguration = {
@@ -787,6 +794,7 @@ resource "aws_ecs_task_definition" "cron" {
         { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },
         { name = "AUTOMIGRATE", value = "no" },
         { name = "AUTOREBUILD", value = "no" },
+        { name = "PYTHONUNBUFFERED", value = "1" },
       ]
       mountPoints = local.common_mount_points
       logConfiguration = {

@@ -25,12 +25,19 @@ password = ${smtp_password}
 tls = ${smtp_tls}
 
 [redis]
-location = redis://:${redis_auth_token}@${redis_host}:6379/0
+location = rediss://:${redis_auth_token}@${redis_host}:6379/0
 sessions = true
 
 [celery]
-backend = redis://:${redis_auth_token}@${redis_host}:6379/1
-broker = redis://:${redis_auth_token}@${redis_host}:6379/2
+backend = rediss://:${redis_auth_token}@${redis_host}:6379/1?ssl_cert_reqs=required
+broker = rediss://:${redis_auth_token}@${redis_host}:6379/2?ssl_cert_reqs=required
+%{ if pretix_sso != null ~}
+
+[plugin:pretalx_pretix_sso]
+issuer = ${pretix_sso.issuer}
+client_id = ${pretix_sso.client_id}
+client_secret = ${pretix_sso.client_secret}
+%{ endif ~}
 %{ if extra_config != "" ~}
 
 ${extra_config}

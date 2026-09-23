@@ -93,8 +93,9 @@ variable "smtp_from" {
 }
 
 variable "smtp_host" {
-  description = "SMTP host for pretalx mail delivery."
+  description = "SMTP host for pretalx mail delivery. Ignored when ses_enabled is true."
   type        = string
+  default     = null
 }
 
 variable "smtp_port" {
@@ -104,14 +105,40 @@ variable "smtp_port" {
 }
 
 variable "smtp_user" {
-  description = "SMTP username for pretalx mail delivery."
+  description = "SMTP username for pretalx mail delivery. Ignored when ses_enabled is true."
   type        = string
+  default     = null
 }
 
 variable "smtp_password" {
-  description = "SMTP password for pretalx mail delivery."
+  description = "SMTP password for pretalx mail delivery. Ignored when ses_enabled is true."
   type        = string
+  default     = null
   sensitive   = true
+}
+
+variable "ses_enabled" {
+  description = "Create an SES domain identity, DNS records and SMTP credentials, and use them for pretalx mail."
+  type        = bool
+  default     = true
+}
+
+variable "ses_domain" {
+  description = "Domain to verify in SES. Defaults to the domain of smtp_from. Must be in route53_zone_id."
+  type        = string
+  default     = null
+}
+
+variable "ses_mail_from_subdomain" {
+  description = "Subdomain of ses_domain used as the custom MAIL FROM domain (SPF alignment)."
+  type        = string
+  default     = "mail"
+}
+
+variable "ses_dmarc_policy" {
+  description = "DMARC policy (none, quarantine, reject) published at _dmarc.<ses_domain>. Set to null to skip, e.g. if a DMARC record already exists."
+  type        = string
+  default     = "none"
 }
 
 variable "smtp_tls" {
@@ -270,6 +297,25 @@ variable "nginx_image" {
   description = "Nginx image used by the web sidecar."
   type        = string
   default     = "public.ecr.aws/nginx/nginx:1.27-alpine"
+}
+
+variable "pretix_sso_issuer" {
+  description = "pretix organizer URL used as OIDC issuer for speaker SSO (e.g. https://pretix.eu/myorg). Leave empty to disable."
+  type        = string
+  default     = ""
+}
+
+variable "pretix_sso_client_id" {
+  description = "Client ID of the pretix SSO client (Organizer > Customer accounts > SSO clients)."
+  type        = string
+  default     = ""
+}
+
+variable "pretix_sso_client_secret" {
+  description = "Client secret of the pretix SSO client."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "extra_pretalx_config" {
