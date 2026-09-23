@@ -17,7 +17,7 @@ locals {
 
   bootstrap_script = <<-EOT
     set -euo pipefail
-    mkdir -p /etc/pretalx /data/logs /public/media /public/static
+    mkdir -p /etc/pretalx /data/logs /public/media
     printf '%s' "$PRETALX_CONFIG" > /etc/pretalx/pretalx.cfg
   EOT
 
@@ -35,13 +35,6 @@ locals {
 
         location /media/ {
             alias /public/media/;
-            add_header Content-Disposition 'attachment; filename="$1"';
-            expires 7d;
-            access_log off;
-        }
-
-        location /static/ {
-            alias /public/static/;
             add_header Content-Disposition 'attachment; filename="$1"';
             expires 7d;
             access_log off;
@@ -589,7 +582,7 @@ resource "aws_ecs_task_definition" "web" {
       dependsOn = [{ containerName = "bootstrap", condition = "SUCCESS" }]
       environment = [
         { name = "PRETALX_FILESYSTEM_MEDIA", value = "/public/media" },
-        { name = "PRETALX_FILESYSTEM_STATIC", value = "/public/static" },
+        { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },
         { name = "GUNICORN_BIND_ADDR", value = "0.0.0.0:8346" },
         { name = "GUNICORN_FORWARDED_ALLOW_IPS", value = "*" },
         { name = "AUTOMIGRATE", value = "yes" },
@@ -708,7 +701,7 @@ resource "aws_ecs_task_definition" "worker" {
       dependsOn = [{ containerName = "bootstrap", condition = "SUCCESS" }]
       environment = [
         { name = "PRETALX_FILESYSTEM_MEDIA", value = "/public/media" },
-        { name = "PRETALX_FILESYSTEM_STATIC", value = "/public/static" },
+        { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },
         { name = "AUTOMIGRATE", value = "no" },
         { name = "AUTOREBUILD", value = "no" },
       ]
@@ -791,7 +784,7 @@ resource "aws_ecs_task_definition" "cron" {
       dependsOn = [{ containerName = "bootstrap", condition = "SUCCESS" }]
       environment = [
         { name = "PRETALX_FILESYSTEM_MEDIA", value = "/public/media" },
-        { name = "PRETALX_FILESYSTEM_STATIC", value = "/public/static" },
+        { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },
         { name = "AUTOMIGRATE", value = "no" },
         { name = "AUTOREBUILD", value = "no" },
       ]

@@ -88,7 +88,7 @@ That removes the need for a separate EC2 host or a manual EFS mount just to plac
 
 ## First-time initialization
 
-The web service automatically runs migrations and static rebuilds on startup.
+The web service automatically runs migrations on startup. Static files are built into the image at `/pretalx/src/static.dist` and served by pretalx (WhiteNoise).
 
 To create the first pretalx user, use ECS Exec against a running web task and run:
 
@@ -99,6 +99,6 @@ pretalx init
 ## Notes
 
 - The ALB serves HTTPS and forwards to the nginx sidecar on port `80`.
-- The nginx sidecar serves `/static/` and `/media/` directly from the shared EFS volume.
+- The nginx sidecar serves `/media/` directly from the shared EFS volume and proxies everything else, including `/static/`, to pretalx.
 - The worker and cron tasks share the same EFS, PostgreSQL, and Redis backends as the web service.
 - The OpenTofu state contains secrets (database and Redis credentials). The S3 backend bucket has versioning, default encryption, and blocked public access, but you should also restrict bucket access with IAM to only the principals that run OpenTofu.
