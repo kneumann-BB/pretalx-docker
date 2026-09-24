@@ -8,7 +8,7 @@ from django.core.cache import cache
 
 from .oidc import TIMEOUT, get_config
 
-CACHE_SECONDS = 300
+CACHE_SECONDS = 3600 #Cache for an hour
 
 # How a speaker is covered, strongest match first
 PAID_ACCOUNT = "account"  # paid order placed with their linked pretix account
