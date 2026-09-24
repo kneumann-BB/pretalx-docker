@@ -4,8 +4,10 @@ from django.urls import resolve, reverse
 from django.utils.html import format_html
 from django.utils.http import urlencode
 from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 
 from pretalx.cfp.signals import html_head
+from pretalx.common.signals import activitylog_display
 from pretalx.orga.signals import nav_event
 
 from .oidc import is_configured
@@ -63,3 +65,37 @@ def add_tickets_nav(sender, request, **kwargs):
         }
     ]
 
+
+LOG_ACTIONS = {
+    "pretalx_pretix_sso.override.set": _("A speaker was marked as covered for pretix tickets."),
+    "pretalx_pretix_sso.override.removed": _("A speaker's pretix ticket override was removed."),
+    "pretalx_pretix_sso.account.created": _(
+        "A speaker account was created by logging in with pretix."
+    ),
+    "pretalx_pretix_sso.account.moved": _(
+        "A speaker account was linked to a different pretix account."
+    ),
+}
+
+
+@receiver(activitylog_display, dispatch_uid="pretix_sso_activitylog_display")
+def display_log_entry(sender, activitylog, **kwargs):
+    action = activitylog.action_type
+    if action == "pretalx_pretix_sso.tag.synced":
+        data = activitylog.json_data or {}
+        return gettext(
+            'The "{tag}" tag was synced with pretix tickets: added to {added}, '
+            "removed from {removed} proposals."
+        ).format(
+            tag=data.get("tag", "needTicket"),
+            added=data.get("added", 0),
+            removed=data.get("removed", 0),
+        )
+    if action == "pretalx_pretix_sso.account.linked":
+        if (activitylog.json_data or {}).get("password_disabled"):
+            return gettext(
+                "An existing speaker account was linked to a pretix account, and its "
+                "password was disabled."
+            )
+        return gettext("An existing speaker account was linked to a pretix account.")
+    return LOG_ACTIONS.get(action)

@@ -10,7 +10,7 @@ from pretalx_pretix_sso.models import PretixCustomer, TicketOverride
 
 
 def _holders(emails=(), customers=()):
-    return tickets.TicketHolders(frozenset(emails), frozenset(customers))
+    return tickets.TicketHolders.from_emails(emails, customers)
 
 
 @pytest.fixture
@@ -140,3 +140,47 @@ def test_page_404_when_plugin_disabled(tickets_page, event):
     event.save()
     with pytest.raises(Http404):
         tickets_page()
+
+
+def test_sync_survives_duplicate_tags(tickets_page, pretix, event, make_speaker, make_proposal):
+    from pretalx.submission.models import Tag
+
+    oldest = Tag.objects.create(event=event, tag="needTicket", color="#b23e65")
+    duplicate = Tag.objects.create(event=event, tag="needTicket", color="#000000")
+    make_proposal("Uncovered", "accepted", make_speaker("nobody@example.invalid"))
+    _, messages = tickets_page("post", data={"action": "sync_tag"})
+    assert "added to 1" in messages[-1]
+    assert set(oldest.submissions.values_list("title", flat=True)) == {"Uncovered"}
+    assert not duplicate.submissions.exists()
+
+
+def test_missing_count_only_includes_accepted_speakers(
+    tickets_page, pretix, make_speaker, make_proposal
+):
+    make_proposal("Accepted", "accepted", make_speaker("accepted@example.invalid"))
+    make_proposal("Rejected", "rejected", make_speaker("rejected@example.invalid"))
+    make_proposal("Submitted", "submitted", make_speaker("submitted@example.invalid"))
+    response, _ = tickets_page(query="?partial=1")
+    html = " ".join(response.content.decode().split())
+    assert "1 speaker with an accepted proposal has no ticket." in html
+
+
+def test_activity_log_entries_are_readable(tickets_page, pretix, event, make_speaker, make_proposal):
+    speaker = make_speaker("comp@example.invalid")
+    make_proposal("Talk", "accepted", speaker)
+    tickets_page("post", data={"action": "override_on", "user": speaker.code})
+    tickets_page("post", data={"action": "override_off", "user": speaker.code})
+    tickets_page("post", data={"action": "sync_tag"})
+    shown = [str(log.display) for log in ActivityLog.objects.order_by("pk")]
+    assert not any(text.startswith("pretalx_pretix_sso.") for text in shown), shown
+    assert any("marked as covered" in text for text in shown)
+    assert any("override was removed" in text for text in shown)
+    assert any('"needTicket" tag was synced' in text and "added to 1" in text for text in shown)
+
+
+def test_unconfigured_page_names_missing_settings(tickets_page, monkeypatch):
+    monkeypatch.setenv("PRETALX_PRETIX_SSO_ISSUER", "https://tickets.example.invalid")
+    response, _ = tickets_page()
+    html = response.content.decode()
+    assert "<code>organizer</code>" in html and "own domain" in html
+    assert "<code>api_token</code>" not in html  # the token is configured

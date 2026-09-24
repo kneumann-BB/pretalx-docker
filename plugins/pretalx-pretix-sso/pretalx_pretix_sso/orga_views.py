@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 TICKET_TAG = "needTicket"
 
 
+def _ticket_tag(event):
+    """The event's needTicket tag, created if missing. pretalx does not enforce
+    unique tag names, so if duplicates exist the oldest one is used."""
+    tags = list(Tag.objects.filter(event=event, tag=TICKET_TAG).order_by("pk"))
+    if len(tags) > 1:
+        logger.warning(
+            "Event %s has %d %r tags; syncing the oldest", event.slug, len(tags), TICKET_TAG
+        )
+    return tags[0] if tags else Tag.objects.create(
+        event=event, tag=TICKET_TAG, color="#b23e65"
+    )
+
+
 def _overridden_user_ids(event):
     return set(
         TicketOverride.objects.filter(event=event).values_list("user_id", flat=True)
@@ -77,6 +90,13 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             )
         else:
             TicketOverride.objects.filter(event=event, user=user).delete()
+        logger.info(
+            "User %s %s the ticket override for speaker %s on event %s",
+            request.user.code,
+            "set" if enabled else "removed",
+            user.code,
+            event.slug,
+        )
         event.log_action(
             "pretalx_pretix_sso.override." + ("set" if enabled else "removed"),
             person=request.user,
@@ -87,7 +107,16 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
     def _sync_tag(self, request):
         event = request.event
         if not tickets.is_configured():
+            logger.info(
+                "Tag sync on event %s skipped: ticket check not configured", event.slug
+            )
             return
+        logger.info(
+            "User %s started the %s tag sync on event %s",
+            request.user.code,
+            TICKET_TAG,
+            event.slug,
+        )
         try:
             holders = tickets.ticket_holders(event, refresh=True)
         except tickets.LOOKUP_ERRORS:
@@ -98,9 +127,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
         overridden = _overridden_user_ids(event)
         added = removed = 0
         with transaction.atomic():
-            tag, _created = Tag.objects.get_or_create(
-                event=event, tag=TICKET_TAG, defaults={"color": "#b23e65"}
-            )
+            tag = _ticket_tag(event)
             tagged = set(tag.submissions.values_list("pk", flat=True))
             submissions = event.submissions.prefetch_related(
                 "speakers__pretix_customer"
@@ -121,6 +148,13 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
                 elif not needs_ticket and submission.pk in tagged:
                     submission.tags.remove(tag)
                     removed += 1
+        logger.info(
+            "%s tag sync on event %s: added to %d, removed from %d proposals",
+            TICKET_TAG,
+            event.slug,
+            added,
+            removed,
+        )
         event.log_action(
             "pretalx_pretix_sso.tag.synced",
             person=request.user,
@@ -137,7 +171,8 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         event = self.request.event
-        ctx["configured"] = tickets.is_configured()
+        ctx["missing_settings"] = tickets.missing_settings()
+        ctx["configured"] = not ctx["missing_settings"]
         ctx["pretix_event"] = tickets.pretix_event_slug(event)
         ctx["ticket_tag"] = TICKET_TAG
         ctx["can_edit"] = self.request.user.has_perm("orga.change_submissions", event)
@@ -186,5 +221,10 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
                     "linked": tickets.customer_identifier(profile.user) is not None,
                 }
             )
-        ctx["missing_count"] = sum(1 for row in ctx["rows"] if not row["status"])
+        # Only speakers who are actually on the programme need a ticket
+        ctx["missing_count"] = sum(
+            1
+            for row in ctx["rows"]
+            if not row["status"] and row["profile"].accepted_count
+        )
         return ctx

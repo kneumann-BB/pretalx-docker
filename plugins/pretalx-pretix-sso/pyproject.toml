@@ -3,7 +3,10 @@ name = "pretalx-pretix-sso"
 version = "0.2.0"
 description = "Log in to the pretalx CfP with a pretix customer account (OpenID Connect)"
 requires-python = ">=3.10"
-dependencies = ["requests"]
+# pretalx: the series this plugin is tested against. It patches pretalx
+# internals (see restrict.py), so widen this only after the tests pass on the
+# new version; tests/test_restrict.py fails when the installed pretalx is outside.
+dependencies = ["requests", "pretalx>=2024.3.1,<2024.4"]
 
 [project.entry-points."pretalx.plugin"]
 pretalx_pretix_sso = "pretalx_pretix_sso:PretalxPluginMeta"

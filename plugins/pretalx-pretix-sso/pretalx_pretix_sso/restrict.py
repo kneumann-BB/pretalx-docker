@@ -1,5 +1,7 @@
 """Make pretix SSO the only way to create an account on SSO-enabled events."""
 
+import logging
+
 from django.contrib import messages
 from django.shortcuts import redirect
 from django.utils.translation import gettext as _
@@ -8,6 +10,8 @@ from pretalx.cfp.flow import UserStep
 from pretalx.cfp.views.auth import LoginView
 
 from .oidc import is_enabled
+
+logger = logging.getLogger(__name__)
 
 
 def _patch(cls, name, make_wrapper):
@@ -24,6 +28,11 @@ def _user_step_post(original):
         # The account step only runs for anonymous users, so any POST here is
         # a password login or registration attempt.
         if is_enabled(request.event):
+            logger.info(
+                "Refused password login/registration in the submission wizard of "
+                "event %s: pretix SSO only",
+                request.event.slug,
+            )
             self.request = request
             messages.error(request, _("Please log in with pretix to continue."))
             return self.get(request)
@@ -40,6 +49,10 @@ def _login_view_post(original):
             "login_password"
         )
         if is_enabled(request.event) and not is_login:
+            logger.info(
+                "Refused registration on the login page of event %s: pretix SSO only",
+                request.event.slug,
+            )
             messages.error(
                 request, _("New accounts are created by logging in with pretix.")
             )

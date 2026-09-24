@@ -6,8 +6,10 @@ iss, aud, exp and nonce.
 """
 
 import base64
+import functools
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -17,6 +19,7 @@ from django.conf import settings
 from django.core.cache import cache
 
 TIMEOUT = 10
+logger = logging.getLogger(__name__)
 
 
 class OIDCError(Exception):
@@ -33,6 +36,26 @@ def _setting(conf, key, default=""):
     return os.environ.get(ENV_PREFIX + key.upper()) or conf.get(key, default)
 
 
+@functools.lru_cache(maxsize=8)
+def _parse_event_map(raw):
+    """Parse "pretalx-slug=pretix-slug, other=other-pretix". Cached per value, so
+    each malformed entry is reported once per process, not on every call."""
+    mapping = {}
+    for entry in raw.split(","):
+        if not entry.strip():
+            continue
+        pretalx_slug, sep, pretix_slug = (part.strip() for part in entry.partition("="))
+        if not sep or not pretalx_slug or not pretix_slug:
+            logger.warning(
+                "Ignoring malformed pretix SSO event_map entry %r; expected "
+                "pretalx-slug=pretix-slug",
+                entry.strip(),
+            )
+            continue
+        mapping[pretalx_slug] = pretix_slug
+    return mapping
+
+
 def get_config():
     conf = settings.PLUGIN_SETTINGS.get("pretalx_pretix_sso", {})
     return {
@@ -43,12 +66,7 @@ def get_config():
         "pretix_url": _setting(conf, "pretix_url"),
         "organizer": _setting(conf, "organizer"),
         "api_token": _setting(conf, "api_token"),
-        # "pretalx-slug=pretix-slug, other=other-pretix"
-        "event_map": dict(
-            (part.strip() for part in pair.split("=", 1))
-            for pair in _setting(conf, "event_map").split(",")
-            if "=" in pair
-        ),
+        "event_map": dict(_parse_event_map(_setting(conf, "event_map"))),
     }
 
 
@@ -88,6 +106,7 @@ def discovery():
         data = _json_object(response, "Discovery")
         if not all(isinstance(data.get(k), str) for k in DISCOVERY_KEYS):
             raise OIDCError("Discovery document is missing endpoints")
+        logger.info("Fetched pretix OpenID configuration from %s", issuer)
         cache.set(key, data, 3600)
     return data
 

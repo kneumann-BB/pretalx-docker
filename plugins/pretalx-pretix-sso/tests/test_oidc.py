@@ -169,3 +169,22 @@ def test_broken_discovery_raises_oidc_error_and_is_not_cached(document):
             with pytest.raises(oidc.OIDCError):
                 oidc.discovery()
     assert get.call_count == 2
+
+
+def test_malformed_event_map_entries_are_reported_once(monkeypatch, caplog):
+    oidc._parse_event_map.cache_clear()
+    monkeypatch.setenv("PRETALX_PRETIX_SSO_EVENT_MAP", "good=pretix-good, broken, =x, y=, ,")
+    with caplog.at_level("WARNING", logger="pretalx_pretix_sso.oidc"):
+        assert oidc.get_config()["event_map"] == {"good": "pretix-good"}
+        oidc.get_config()  # same value again: no repeated warnings
+    reported = [r.getMessage() for r in caplog.records]
+    assert len(reported) == 3
+    assert all("expected pretalx-slug=pretix-slug" in m for m in reported)
+    assert any("'broken'" in m for m in reported)
+
+
+def test_event_map_result_cannot_corrupt_cache(monkeypatch):
+    oidc._parse_event_map.cache_clear()
+    monkeypatch.setenv("PRETALX_PRETIX_SSO_EVENT_MAP", "a=b")
+    oidc.get_config()["event_map"]["a"] = "changed"
+    assert oidc.get_config()["event_map"] == {"a": "b"}

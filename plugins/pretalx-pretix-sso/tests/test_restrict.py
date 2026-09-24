@@ -101,3 +101,22 @@ def test_plugin_version_comes_from_pyproject():
     pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text()
     expected = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M).group(1)
     assert PluginApp.PretalxPluginMeta.version == expected
+
+
+def test_installed_pretalx_is_in_supported_range():
+    import re
+    from importlib import metadata
+    from pathlib import Path
+
+    from packaging.requirements import Requirement
+
+    pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+    deps = re.search(r"^dependencies\s*=\s*\[(.*?)\]", pyproject, re.M | re.S).group(1)
+    pretalx = next(
+        Requirement(dep) for dep in re.findall(r'"([^"]+)"', deps) if dep.startswith("pretalx")
+    )
+    installed = metadata.version("pretalx")
+    assert pretalx.specifier.contains(installed), (
+        f"pretalx {installed} is outside the supported range {pretalx.specifier}: "
+        "check restrict.py and the wizard step workaround, then widen the range"
+    )

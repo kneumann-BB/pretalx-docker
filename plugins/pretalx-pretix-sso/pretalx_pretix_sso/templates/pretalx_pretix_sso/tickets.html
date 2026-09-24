@@ -13,10 +13,24 @@
     <h2>{% translate "pretix tickets" %}</h2>
     {% if not configured %}
         <div class="alert alert-warning">
-            {% blocktranslate trimmed %}
-                The pretix API is not configured. Set <code>api_token</code> in the
-                <code>[plugin:pretalx_pretix_sso]</code> section of pretalx.cfg.
-            {% endblocktranslate %}
+            <div>
+                {% blocktranslate trimmed %}
+                    The pretix ticket check is not configured yet. Set these in the
+                    <code>[plugin:pretalx_pretix_sso]</code> section of pretalx.cfg, or as
+                    <code>PRETALX_PRETIX_SSO_&lt;NAME&gt;</code> environment variables:
+                {% endblocktranslate %}
+                {% for name in missing_settings %}<code>{{ name }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
+            </div>
+            {% if "organizer" in missing_settings %}
+                <div class="mt-2">
+                    {% blocktranslate trimmed %}
+                        The organizer can only be read from issuer URLs like
+                        <code>https://pretix.eu/&lt;organizer&gt;</code>. If your pretix
+                        organizer has its own domain, set <code>organizer</code> to its short
+                        name.
+                    {% endblocktranslate %}
+                </div>
+            {% endif %}
         </div>
     {% else %}
         <p class="text-muted">

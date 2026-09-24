@@ -21,27 +21,34 @@ RUN apt-get update && \
 ENV LC_ALL=C.UTF-8
 
 
+# Layers are ordered from least to most frequently changed, so that editing a
+# plugin only reruns the plugin steps at the end, not the pretalx install.
 COPY pretalx/pyproject.toml /pretalx
 COPY pretalx/src /pretalx/src
-COPY deployment/docker/pretalx.bash /usr/local/bin/pretalx
-COPY deployment/docker/supervisord.conf /etc/supervisord.conf
-COPY plugins /plugins
 
 RUN pip3 install -U pip "setuptools<81" wheel typing && \
     pip3 install -e /pretalx/[mysql,postgres,redis] && \
     pip3 install pylibmc && \
-    pip3 install gunicorn && \
-    pip3 install /plugins/pretalx-pretix-sso
+    pip3 install gunicorn
 
-
-RUN python3 -m pretalx makemigrations
-RUN python3 -m pretalx migrate
-
+# Full static build for pretalx itself, including the npm frontend
 RUN apt-get update && \
     apt-get install -y nodejs npm && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     python3 -m pretalx rebuild
+
+# Plugins: afterwards only their static files need collecting and compressing
+COPY plugins /plugins
+# --no-deps: never let pip swap the pretalx installed above for a PyPI release
+RUN pip3 install --no-deps /plugins/pretalx-pretix-sso && \
+    python3 -m pretalx makemigrations && \
+    python3 -m pretalx migrate && \
+    python3 -m pretalx collectstatic --noinput && \
+    python3 -m pretalx compress
+
+COPY deployment/docker/pretalx.bash /usr/local/bin/pretalx
+COPY deployment/docker/supervisord.conf /etc/supervisord.conf
 
 RUN chmod +x /usr/local/bin/pretalx && \
     cd /pretalx/src && \

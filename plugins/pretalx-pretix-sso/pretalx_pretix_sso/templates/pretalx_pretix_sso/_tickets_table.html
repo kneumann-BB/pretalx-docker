@@ -8,9 +8,9 @@
     {% if rows %}
         <p>
             {% blocktranslate trimmed count count=missing_count %}
-                {{ count }} speaker without a ticket.
+                {{ count }} speaker with an accepted proposal has no ticket.
             {% plural %}
-                {{ count }} speakers without a ticket.
+                {{ count }} speakers with an accepted proposal have no ticket.
             {% endblocktranslate %}
         </p>
     {% endif %}

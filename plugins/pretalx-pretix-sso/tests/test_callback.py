@@ -189,3 +189,90 @@ def _callback_request(event):
         "state": "st", "nonce": "n", "verifier": "v", "event": event.slug, "next": "",
     }
     return request
+
+
+def _stale_callback(event_slug, user=None, state_token="tok"):
+    from django.test import RequestFactory
+
+    state = f"{state_token}.{event_slug}" if event_slug else state_token
+    request = RequestFactory().get("/p/pretix-sso/callback/", {"state": state, "code": "c"})
+    _prepare(request, user=user)  # fresh session: no login in progress
+    return views.CallbackView.as_view()(request), request
+
+
+def test_login_start_puts_event_in_state(event):
+    from django.test import RequestFactory
+
+    request = RequestFactory().get(f"/{event.slug}/p/pretix-sso/login/")
+    _prepare(request, event=event)
+    meta = {"authorization_endpoint": "https://pretix.example.invalid/org/oauth2/v1/authorize"}
+    with mock.patch.object(views.oidc, "discovery", return_value=meta):
+        views.LoginStartView.as_view()(request, event=event.slug)
+    token, _, slug = request.session[views.SESSION_KEY]["state"].partition(".")
+    assert slug == event.slug and len(token) >= 32
+
+
+def test_stale_callback_sends_back_to_event_login(event):
+    response, request = _stale_callback(event.slug)
+    assert response.status_code == 302 and response.url == event.urls.login
+    assert "expired" in " ".join(str(m) for m in request._messages)
+
+
+def test_stale_callback_when_already_logged_in_goes_to_submissions(event, make_speaker):
+    speaker = make_speaker("in@example.invalid")
+    response, _ = _stale_callback(event.slug, user=speaker)
+    assert response.url == event.urls.user_submissions
+
+
+@pytest.mark.parametrize("slug", ["no-such-event", ""])
+def test_stale_callback_without_known_event_is_404(event, slug):
+    with pytest.raises(Http404):
+        _stale_callback(slug)
+
+
+def test_stale_callback_for_disabled_plugin_is_404(event):
+    event.disable_plugin("pretalx_pretix_sso")
+    event.save()
+    with pytest.raises(Http404):
+        _stale_callback(event.slug)
+
+
+def _account_logs(event):
+    from pretalx.common.models import ActivityLog
+
+    return list(
+        ActivityLog.objects.filter(
+            event=event, action_type__startswith="pretalx_pretix_sso.account."
+        ).order_by("pk")
+    )
+
+
+def test_new_account_is_logged_once(sso_callback, event):
+    sso_callback(_userinfo())
+    sso_callback(_userinfo())  # a normal later login is not logged
+    logs = _account_logs(event)
+    assert [log.action_type for log in logs] == ["pretalx_pretix_sso.account.created"]
+    user = User.objects.get(email="new@example.invalid")
+    assert logs[0].person == user and logs[0].content_object == user
+    assert "created by logging in with pretix" in str(logs[0].display)
+
+
+def test_first_link_is_logged_with_password_note(sso_callback, event, make_speaker):
+    make_speaker("pw@example.invalid", password="old")
+    sso_callback(_userinfo(sub="P1", email="pw@example.invalid"))
+    (log,) = _account_logs(event)
+    assert log.action_type == "pretalx_pretix_sso.account.linked"
+    assert log.json_data == {"password_disabled": True}
+    assert "password was disabled" in str(log.display)
+    # no personal data in the log entry
+    assert "pw@example.invalid" not in (log.data or "") and "P1" not in (log.data or "")
+
+
+def test_moved_link_is_logged(sso_callback, event):
+    sso_callback(_userinfo(sub="FIRST"))
+    sso_callback(_userinfo(sub="SECOND"))  # same verified email, other pretix account
+    assert [log.action_type for log in _account_logs(event)] == [
+        "pretalx_pretix_sso.account.created",
+        "pretalx_pretix_sso.account.moved",
+    ]
+    assert "different pretix account" in str(_account_logs(event)[-1].display)
