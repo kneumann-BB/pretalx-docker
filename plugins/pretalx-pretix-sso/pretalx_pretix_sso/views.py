@@ -126,6 +126,16 @@ class CallbackView(View):
         if not user.is_active:
             return fail(_("This account has been deactivated."))
 
+        # pretalx never verified the email of password accounts, so whoever
+        # registered this one may not own the address pretix just verified. On the
+        # first link by email, drop the password so only the pretix owner can get
+        # in (a password reset to the verified address still works).
+        first_link = not link and not PretixCustomer.objects.filter(user=user).exists()
+        if first_link and user.has_usable_password():
+            user.set_unusable_password()
+            user.save(update_fields=["password"])
+            logger.info("Disabled password of user %s on first pretix SSO link", user.code)
+
         # Remember the pretix account so its orders count as this speaker's tickets.
         # The latest login wins if the user switched pretix accounts.
         PretixCustomer.objects.update_or_create(

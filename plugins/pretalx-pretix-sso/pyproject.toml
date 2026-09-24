@@ -1,0 +1,22 @@
+[project]
+name = "pretalx-pretix-sso"
+version = "0.1.0"
+description = "Log in to the pretalx CfP with a pretix customer account (OpenID Connect)"
+requires-python = ">=3.10"
+dependencies = ["requests"]
+
+[project.entry-points."pretalx.plugin"]
+pretalx_pretix_sso = "pretalx_pretix_sso:PretalxPluginMeta"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["pretalx_pretix_sso*"]
+
+[tool.setuptools.package-data]
+pretalx_pretix_sso = ["static/**/*", "templates/**/*"]

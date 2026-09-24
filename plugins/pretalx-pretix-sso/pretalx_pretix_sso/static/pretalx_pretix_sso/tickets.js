@@ -50,6 +50,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const container = document.getElementById("pretix-tickets")
   if (container) loadTable(container)
 
+  // The table request above already carries ?refresh=1; drop it from the address
+  // bar so reloading the page uses the cache instead of refetching from pretix
+  const url = new URL(window.location.href)
+  if (url.searchParams.has("refresh")) {
+    url.searchParams.delete("refresh")
+    window.history.replaceState(null, "", url)
+  }
+
   // Delegated, because the table's forms are inserted after load
   document.addEventListener("submit", (event) => {
     const form = event.target

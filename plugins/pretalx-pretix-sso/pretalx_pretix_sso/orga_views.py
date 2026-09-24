@@ -1,6 +1,5 @@
 import logging
 
-import requests
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Q
@@ -55,7 +54,11 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             self._set_override(request, action == "override_on")
         else:
             raise Http404()
-        return redirect(request.get_full_path())
+        # Back to the page, but without ?refresh=1: the action already fetched
+        # fresh data where needed, and reloads should use the cache again
+        query = request.GET.copy()
+        query.pop("refresh", None)
+        return redirect(f"{request.path}?{query.urlencode()}" if query else request.path)
 
     def _set_override(self, request, enabled):
         event = request.event
@@ -87,7 +90,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             return
         try:
             holders = tickets.ticket_holders(event, refresh=True)
-        except requests.RequestException:
+        except tickets.LOOKUP_ERRORS:
             logger.exception("pretix ticket lookup failed")
             messages.error(request, _("Could not load orders from pretix."))
             return
@@ -151,7 +154,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             holders = tickets.ticket_holders(
                 event, refresh="refresh" in self.request.GET
             )
-        except requests.RequestException:
+        except tickets.LOOKUP_ERRORS:
             logger.exception("pretix ticket lookup failed")
             ctx["load_error"] = True
             return ctx
