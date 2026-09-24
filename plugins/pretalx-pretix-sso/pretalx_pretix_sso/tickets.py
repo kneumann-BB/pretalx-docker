@@ -4,9 +4,11 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 import requests
+from django.conf import settings
 from django.core.cache import cache
 
 from .oidc import TIMEOUT, get_config
@@ -97,6 +99,14 @@ def pretix_event_slug(event):
     return api_config()["event_map"].get(event.slug, event.slug)
 
 
+# Paid live orders, with only the fields used below: about 20x smaller responses
+ORDER_QUERY = {
+    "status": "p",
+    "testmode": "false",
+    "include": ["email", "customer", "positions.item", "positions.attendee_email"],
+}
+
+
 class TicketLookupError(Exception):
     """pretix answered, but not with the data we expected."""
 
@@ -134,7 +144,7 @@ def _fetch_ticket_holders(event_slug):
     emails = set()
     customers = set()
     order_count = 0
-    orders = _get_all(f"{base}/orders/", {"status": "p", "testmode": "false"})
+    orders = _get_all(f"{base}/orders/", ORDER_QUERY)
     for order in orders:
         order_count += 1
         buyer_email = (order.get("email") or "").strip().lower()
@@ -164,48 +174,56 @@ def _fetch_ticket_holders(event_slug):
     return holders
 
 
+def _keys(event):
+    base = f"{api_config()['organizer']}:{pretix_event_slug(event)}"
+    return {
+        "holders": f"pretix_sso_tickets:v6:{base}",
+        "error": f"pretix_sso_refresh_error:v1:{base}",
+        "refresh": f"pretix_sso_job:refresh:{base}",
+        "sync": f"pretix_sso_job:sync:{base}",
+    }
+
+
 def _from_cache(key):
-    # Only plain lists are cached, so a changed TicketHolders class can never
-    # make old entries unreadable; anything unexpected just counts as a miss.
+    """Return (holders, fetched_at) from the cache, or (None, None).
+
+    Only plain lists are cached, so a changed TicketHolders class can never
+    make old entries unreadable; anything unexpected just counts as a miss."""
     try:
         data = cache.get(key)
         if data is None:
-            return None
-        return TicketHolders(
+            return None, None
+        holders = TicketHolders(
             email_hashes=frozenset(data["email_hashes"]),
             customers=frozenset(data["customers"]),
         )
+        return holders, datetime.fromtimestamp(data["fetched_at"], tz=timezone.utc)
     except Exception:
         logger.warning(
             "Ignoring unreadable pretix ticket cache entry %s", key, exc_info=True
         )
-        return None
+        return None, None
 
 
-def _to_cache(key, holders):
-    data = {
-        "email_hashes": sorted(holders.email_hashes),
-        "customers": sorted(holders.customers),
-    }
+def _cache_set(key, value, timeout):
     try:
-        cache.set(key, data, CACHE_SECONDS)
+        cache.set(key, value, timeout)
     except Exception:
-        logger.warning("Could not cache pretix ticket holders", exc_info=True)
+        logger.warning("Could not write pretix SSO cache entry %s", key, exc_info=True)
 
 
-def ticket_holders(event, refresh=False):
-    """Return the paid ticket holders of the pretix event linked to ``event``."""
+def cached_holders(event):
+    """The last fetched ticket holders and when they were fetched, without
+    calling pretix: (holders, fetched_at) or (None, None)."""
+    return _from_cache(_keys(event)["holders"])
+
+
+def refresh_holders(event):
+    """Fetch the ticket holders from pretix now and cache them."""
+    keys = _keys(event)
     slug = pretix_event_slug(event)
-    key = f"pretix_sso_tickets:v5:{api_config()['organizer']}:{slug}"
-    holders = None if refresh else _from_cache(key)
-    if holders is not None:
-        logger.debug("pretix tickets for event %s served from cache", event.slug)
-        return holders
     logger.info(
-        "Fetching pretix tickets for event %s from pretix event %s (%s)",
-        event.slug,
-        slug,
-        "refresh requested" if refresh else "not cached",
+        "Fetching pretix tickets for event %s from pretix event %s", event.slug, slug
     )
     started = time.monotonic()
     try:
@@ -216,11 +234,91 @@ def ticket_holders(event, refresh=False):
             event.slug,
             time.monotonic() - started,
         )
+        _cache_set(keys["error"], {"at": time.time()}, CACHE_SECONDS)
         raise
     logger.info(
         "Fetched pretix tickets for event %s in %.1fs",
         event.slug,
         time.monotonic() - started,
     )
-    _to_cache(key, holders)
+    data = {
+        "email_hashes": sorted(holders.email_hashes),
+        "customers": sorted(holders.customers),
+        "fetched_at": time.time(),
+    }
+    _cache_set(keys["holders"], data, CACHE_SECONDS)
+    try:
+        cache.delete(keys["error"])
+    except Exception:
+        pass
     return holders
+
+
+def ticket_holders(event, refresh=False):
+    """Return the ticket holders, from the cache unless ``refresh`` or missing.
+    Fetches inside the current request; see start_refresh for the background way.
+    """
+    if not refresh:
+        holders, _fetched_at = cached_holders(event)
+        if holders is not None:
+            logger.debug("pretix tickets for event %s served from cache", event.slug)
+            return holders
+    return refresh_holders(event)
+
+
+def last_refresh_failed_at(event):
+    """When the last refresh failed, if it has not succeeded since."""
+    try:
+        error = cache.get(_keys(event)["error"])
+        return datetime.fromtimestamp(error["at"], tz=timezone.utc) if error else None
+    except Exception:
+        return None
+
+
+# Background jobs (celery). A job's cache entry doubles as its lock: it exists
+# while the job is queued or running, and expires on its own if a worker dies.
+JOB_TIMEOUT = 600
+
+
+def runs_in_background():
+    """True when pretalx has a celery worker; otherwise work runs in the request."""
+    return bool(getattr(settings, "HAS_CELERY", False))
+
+
+def acquire_job(event, job):
+    """Claim ``job`` ("refresh" or "sync") for the event; False if already running."""
+    try:
+        return cache.add(_keys(event)[job], time.time(), JOB_TIMEOUT)
+    except Exception:
+        logger.warning("Could not claim pretix SSO %s job", job, exc_info=True)
+        return False
+
+
+def release_job(event, job):
+    try:
+        cache.delete(_keys(event)[job])
+    except Exception:
+        logger.warning("Could not release pretix SSO %s job", job, exc_info=True)
+
+
+def job_running(event, job):
+    try:
+        return cache.get(_keys(event)[job]) is not None
+    except Exception:
+        return False
+
+
+def start_refresh(event):
+    """Queue a background refresh unless one is already queued or running."""
+    from .tasks import refresh_tickets
+
+    if not acquire_job(event, "refresh"):
+        # Debug only: polls land here every few seconds while a refresh runs
+        logger.debug("pretix ticket refresh for event %s already queued", event.slug)
+        return
+    try:
+        refresh_tickets.apply_async(kwargs={"event_id": event.pk})
+    except Exception:
+        release_job(event, "refresh")
+        raise
+    logger.info("Queued a pretix ticket refresh for event %s", event.slug)

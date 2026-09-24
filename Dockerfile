@@ -26,10 +26,13 @@ ENV LC_ALL=C.UTF-8
 COPY pretalx/pyproject.toml /pretalx
 COPY pretalx/src /pretalx/src
 
+# chardet<6: reportlab pulls in chardet 7, which requests 2.32 (pinned by
+# pretalx) does not support; every process would warn about it on startup
 RUN pip3 install -U pip "setuptools<81" wheel typing && \
     pip3 install -e /pretalx/[mysql,postgres,redis] && \
     pip3 install pylibmc && \
-    pip3 install gunicorn
+    pip3 install gunicorn && \
+    pip3 install "chardet<6"
 
 # Full static build for pretalx itself, including the npm frontend
 RUN apt-get update && \

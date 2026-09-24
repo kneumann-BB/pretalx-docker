@@ -84,7 +84,7 @@ def test_ticket_fetch_is_logged_with_counts_and_cache_hits(event, plugin_logs):
         tickets.ticket_holders(event)
         tickets.ticket_holders(event)
     logs = plugin_logs()
-    assert any("Fetching pretix tickets" in m and "not cached" in m for m in logs)
+    assert any("Fetching pretix tickets for event" in m for m in logs)
     assert any(re.search(r"Fetched pretix tickets for event \S+ in \d+\.\ds$", m) for m in logs)
     assert any("served from cache" in m for m in logs)
 
@@ -149,3 +149,49 @@ def test_logs_contain_no_personal_data(
     assert len(logs) > 10
     leaked = [m for m in logs if any(p in m for p in PERSONAL_DATA)]
     assert not leaked, leaked
+
+
+def test_sync_logs_go_to_stdout_once_and_not_stderr(
+    tickets_page, event, make_speaker, make_proposal, capfd
+):
+    make_proposal("Talk", "accepted", make_speaker("nobody@example.invalid"))
+    with mock.patch.object(
+        tickets, "_fetch_ticket_holders", return_value=tickets.TicketHolders.from_emails()
+    ):
+        tickets_page("post", data={"action": "sync_tag"})
+    out, err = capfd.readouterr()  # file-descriptor level: the real stdout/stderr
+    result_lines = [line for line in out.splitlines() if "tag sync on event test:" in line]
+    assert len(result_lines) == 1, out
+    # pretalx's log format: level, time, logger name, module, message
+    assert re.match(
+        r"INFO \d{4}-\d\d-\d\d [\d:,]+ pretalx_pretix_sso\.tagging tagging needTicket", result_lines[0]
+    ), result_lines[0]
+    assert "Finished the needTicket tag sync" in out
+    assert "pretalx_pretix_sso" not in err
+
+
+def test_plugin_logs_still_reach_the_pretalx_log_file():
+    from pretalx_pretix_sso.log import PLUGIN_LOGGER
+
+    plugin_logger = logging.getLogger(PLUGIN_LOGGER)
+    root_files = [h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)]
+    assert root_files and all(h in plugin_logger.handlers for h in root_files)
+    assert plugin_logger.propagate is False  # so nothing is written twice
+
+
+def test_logging_setup_is_idempotent():
+    from pretalx_pretix_sso.log import PLUGIN_LOGGER, StdoutHandler, configure_plugin_logging
+
+    configure_plugin_logging()
+    configure_plugin_logging()
+    handlers = logging.getLogger(PLUGIN_LOGGER).handlers
+    assert sum(isinstance(h, StdoutHandler) for h in handlers) == 1
+
+
+def test_stdout_survives_celery_replacing_sys_stdout(capfd, monkeypatch):
+    import io
+
+    monkeypatch.setattr("sys.stdout", io.StringIO())  # what celery's worker does
+    logging.getLogger("pretalx_pretix_sso.tasks").info("Running the needTicket tag sync")
+    out, _ = capfd.readouterr()
+    assert "Running the needTicket tag sync" in out

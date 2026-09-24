@@ -38,6 +38,8 @@ class PluginApp(AppConfig):
 
     def ready(self):
         from . import signals  # noqa: F401
+        from .log import configure_plugin_logging
         from .restrict import patch_views
 
+        configure_plugin_logging()
         patch_views()

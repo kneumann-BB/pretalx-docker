@@ -1,7 +1,7 @@
 import logging
+import time
 
 from django.contrib import messages
-from django.db import transaction
 from django.db.models import Count, Q
 from django.http import Http404
 from django.shortcuts import redirect
@@ -10,32 +10,12 @@ from django.views.generic import TemplateView
 
 from pretalx.common.views.mixins import EventPermissionRequired
 from pretalx.orga.views.speaker import get_speaker_profiles_for_user
-from pretalx.submission.models import SubmissionStates, Tag
+from pretalx.submission.models import SubmissionStates
 
-from . import tickets
+from . import tagging, tickets
 from .models import TicketOverride
 
 logger = logging.getLogger(__name__)
-TICKET_TAG = "needTicket"
-
-
-def _ticket_tag(event):
-    """The event's needTicket tag, created if missing. pretalx does not enforce
-    unique tag names, so if duplicates exist the oldest one is used."""
-    tags = list(Tag.objects.filter(event=event, tag=TICKET_TAG).order_by("pk"))
-    if len(tags) > 1:
-        logger.warning(
-            "Event %s has %d %r tags; syncing the oldest", event.slug, len(tags), TICKET_TAG
-        )
-    return tags[0] if tags else Tag.objects.create(
-        event=event, tag=TICKET_TAG, color="#b23e65"
-    )
-
-
-def _overridden_user_ids(event):
-    return set(
-        TicketOverride.objects.filter(event=event).values_list("user_id", flat=True)
-    )
 
 
 class TicketCheckView(EventPermissionRequired, TemplateView):
@@ -114,56 +94,68 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
         logger.info(
             "User %s started the %s tag sync on event %s",
             request.user.code,
-            TICKET_TAG,
+            tagging.TICKET_TAG,
             event.slug,
         )
+        if tickets.runs_in_background():
+            self._queue_sync(request)
+            return
+        # No celery worker: fetch and sync within this request
+        started = time.monotonic()
         try:
             holders = tickets.ticket_holders(event, refresh=True)
         except tickets.LOOKUP_ERRORS:
-            logger.exception("pretix ticket lookup failed")
+            logger.exception(
+                "The %s tag sync for event %s failed: pretix unavailable",
+                tagging.TICKET_TAG,
+                event.slug,
+            )
+            tagging.record_sync_failure(event, request.user, tagging.FAILED_PRETIX)
             messages.error(request, _("Could not load orders from pretix."))
             return
-
-        overridden = _overridden_user_ids(event)
-        added = removed = 0
-        with transaction.atomic():
-            tag = _ticket_tag(event)
-            tagged = set(tag.submissions.values_list("pk", flat=True))
-            submissions = event.submissions.prefetch_related(
-                "speakers__pretix_customer"
-            )
-            # Every proposal in any state and of any submission type (pretalx
-            # already leaves out drafts and deleted ones) needs a ticket until
-            # any of its speakers is covered
-            for submission in submissions:
-                needs_ticket = not any(
-                    holders.status(speaker, speaker.pk in overridden)
-                    for speaker in submission.speakers.all()
-                )
-                if needs_ticket and submission.pk not in tagged:
-                    submission.tags.add(tag)
-                    added += 1
-                elif not needs_ticket and submission.pk in tagged:
-                    submission.tags.remove(tag)
-                    removed += 1
+        added, removed = tagging.sync_ticket_tag(event, holders, request.user)
         logger.info(
-            "%s tag sync on event %s: added to %d, removed from %d proposals",
-            TICKET_TAG,
+            "Finished the %s tag sync for event %s in %.1fs",
+            tagging.TICKET_TAG,
             event.slug,
-            added,
-            removed,
-        )
-        event.log_action(
-            "pretalx_pretix_sso.tag.synced",
-            person=request.user,
-            orga=True,
-            data={"tag": TICKET_TAG, "added": added, "removed": removed},
+            time.monotonic() - started,
         )
         messages.success(
             request,
             _(
                 'Tag "{tag}" updated: added to {added}, removed from {removed} proposals.'
-            ).format(tag=TICKET_TAG, added=added, removed=removed),
+            ).format(tag=tagging.TICKET_TAG, added=added, removed=removed),
+        )
+
+    def _queue_sync(self, request):
+        from .tasks import sync_ticket_tag
+
+        event = request.event
+        if not tickets.acquire_job(event, "sync"):
+            logger.info(
+                "User %s asked for a %s tag sync on event %s; one is already running",
+                request.user.code,
+                tagging.TICKET_TAG,
+                event.slug,
+            )
+            messages.info(request, _("A tag sync is already running."))
+            return
+        try:
+            sync_ticket_tag.apply_async(
+                kwargs={"event_id": event.pk, "user_id": request.user.pk}
+            )
+        except Exception:
+            tickets.release_job(event, "sync")
+            logger.exception("Could not queue the tag sync for event %s", event.slug)
+            messages.error(request, _("Could not start the tag sync. Please try again."))
+            return
+        logger.info("Queued the %s tag sync for event %s", tagging.TICKET_TAG, event.slug)
+        messages.info(
+            request,
+            _(
+                "The tag sync has started. Its result will appear on this page and in "
+                "the activity log in a moment."
+            ),
         )
 
     def get_context_data(self, **kwargs):
@@ -172,7 +164,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
         ctx["missing_settings"] = tickets.missing_settings()
         ctx["configured"] = not ctx["missing_settings"]
         ctx["pretix_event"] = tickets.pretix_event_slug(event)
-        ctx["ticket_tag"] = TICKET_TAG
+        ctx["ticket_tag"] = tagging.TICKET_TAG
         ctx["can_edit"] = self.request.user.has_perm("orga.change_submissions", event)
         ctx["only_accepted"] = self.request.GET.get("accepted") == "1"
         ctx["rows"] = []
@@ -183,16 +175,15 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             query["partial"] = "1"
             ctx["table_url"] = f"{self.request.path}?{query.urlencode()}"
             return ctx
-        try:
-            holders = tickets.ticket_holders(
-                event, refresh="refresh" in self.request.GET
-            )
-        except tickets.LOOKUP_ERRORS:
-            logger.exception("pretix ticket lookup failed")
-            ctx["load_error"] = True
+        ctx["last_sync"] = tagging.last_sync(event)
+        if tickets.runs_in_background():
+            holders = self._holders_from_background(ctx)
+        else:
+            holders = self._holders_in_request(ctx)
+        if holders is None:
             return ctx
 
-        overridden = _overridden_user_ids(event)
+        overridden = tagging.overridden_user_ids(event)
         profiles = (
             get_speaker_profiles_for_user(self.request.user, event)
             .select_related("user", "user__pretix_customer")
@@ -226,3 +217,42 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             if not row["status"] and row["profile"].accepted_count
         )
         return ctx
+
+    def _holders_in_request(self, ctx):
+        """No celery worker: fetch from pretix within this request if needed."""
+        event = self.request.event
+        try:
+            holders = tickets.ticket_holders(
+                event, refresh="refresh" in self.request.GET
+            )
+        except tickets.LOOKUP_ERRORS:
+            logger.exception("pretix ticket lookup failed")
+            ctx["load_error"] = True
+            return None
+        ctx["fetched_at"] = tickets.cached_holders(event)[1]
+        return holders
+
+    def _holders_from_background(self, ctx):
+        """Never call pretix here: show the cached data, queue a refresh when
+        asked for or when there is nothing to show, and let tickets.js poll."""
+        event = self.request.event
+        holders, fetched_at = tickets.cached_holders(event)
+        failed_at = tickets.last_refresh_failed_at(event)
+        # After a failure, only retry when asked, not on every poll
+        if "refresh" in self.request.GET or (holders is None and not failed_at):
+            try:
+                tickets.start_refresh(event)
+            except Exception:
+                logger.exception("Could not queue a pretix refresh for %s", event.slug)
+        ctx["refreshing"] = tickets.job_running(event, "refresh")
+        ctx["syncing"] = tickets.job_running(event, "sync")
+        ctx["pending"] = ctx["refreshing"] or ctx["syncing"]
+        ctx["fetched_at"] = fetched_at
+        if failed_at and (not fetched_at or failed_at > fetched_at):
+            ctx["failed_at"] = failed_at
+        if holders is None:
+            if ctx["refreshing"]:
+                ctx["waiting"] = True
+            else:
+                ctx["load_error"] = True
+        return holders

@@ -48,7 +48,11 @@ def _fake_get(url, params=None, headers=None, timeout=None):
     if "page=2" in url:
         assert params is None  # "next" already carries the query
         return _response(ORDERS_PAGE_2)
-    assert params == {"status": "p", "testmode": "false"}
+    assert params == {
+        "status": "p",
+        "testmode": "false",
+        "include": ["email", "customer", "positions.item", "positions.attendee_email"],
+    }
     return _response(ORDERS_PAGE_1)
 
 
@@ -139,17 +143,18 @@ def test_cache_holds_only_plain_data(event):
 
     stored = cache._cache[key]
     assert b"@example.invalid" not in stored  # no plain email addresses in Redis
-    assert pickle.loads(stored) == {
-        "email_hashes": [tickets.email_hash("a@example.invalid")],
-        "customers": ["C1"],
-    }
+    data = pickle.loads(stored)
+    assert data["email_hashes"] == [tickets.email_hash("a@example.invalid")]
+    assert data["customers"] == ["C1"]
+    assert isinstance(data["fetched_at"], float)
+    assert set(data) == {"email_hashes", "customers", "fetched_at"}  # plain data only
 
 
 @pytest.mark.parametrize("junk", [["unexpected"], {"emails": ["x"]}, "text"])
 def test_unreadable_cache_entry_counts_as_miss(event, junk):
     from django.core.cache import cache
 
-    cache.set(f"pretix_sso_tickets:v5:org:{event.slug}", junk)
+    cache.set(f"pretix_sso_tickets:v6:org:{event.slug}", junk)
     fresh = tickets.TicketHolders.from_emails({"fresh@example.invalid"})
     with mock.patch.object(tickets, "_fetch_ticket_holders", return_value=fresh) as fetch:
         assert tickets.ticket_holders(event) == fresh

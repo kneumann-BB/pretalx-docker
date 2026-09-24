@@ -54,9 +54,22 @@ const showError = (container) => {
   container.replaceChildren(alert)
 }
 
-const loadTable = async (container) => {
+// While a background job (refresh or tag sync) runs, the table reports
+// data-pending="1" and is polled again, backing off up to POLL_MAX_MS.
+const POLL_FIRST_MS = 1500
+const POLL_MAX_MS = 10000
+const POLL_GIVE_UP_MS = 10 * 60 * 1000 // background jobs time out after 10 minutes
+
+// Polls must not carry ?refresh=1, or every poll would queue another refresh
+const withoutRefresh = (url) => {
+  const parsed = new URL(url, window.location.href)
+  parsed.searchParams.delete("refresh")
+  return parsed.toString()
+}
+
+const loadTable = async (container, url = container.dataset.url, poll = null) => {
   try {
-    const response = await fetch(container.dataset.url, {
+    const response = await fetch(url, {
       credentials: "same-origin",
       headers: { "X-Requested-With": "XMLHttpRequest" },
     })
@@ -67,7 +80,17 @@ const loadTable = async (container) => {
   } catch (e) {
     console.error("pretix ticket table failed to load", e)
     showError(container)
+    return
   }
+  const pending = container.querySelector('[data-pending="1"]')
+  const state = poll || { started: Date.now(), delay: POLL_FIRST_MS }
+  if (!pending || Date.now() - state.started > POLL_GIVE_UP_MS) return
+  window.setTimeout(() => {
+    loadTable(container, withoutRefresh(container.dataset.url), {
+      started: state.started,
+      delay: Math.min(state.delay * 1.5, POLL_MAX_MS),
+    })
+  }, state.delay)
 }
 
 document.addEventListener("DOMContentLoaded", () => {

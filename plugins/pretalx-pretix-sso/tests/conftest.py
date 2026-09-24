@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 from unittest import mock
 
 import pytest
@@ -8,6 +9,16 @@ from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.test import RequestFactory
 from django_scopes import scopes_disabled
+
+
+@pytest.fixture(autouse=True)
+def _plugin_logs_reach_caplog(caplog):
+    # The plugin logger does not propagate to the root logger (see log.py),
+    # where caplog listens, so attach caplog to it directly
+    plugin_logger = logging.getLogger("pretalx_pretix_sso")
+    plugin_logger.addHandler(caplog.handler)
+    yield
+    plugin_logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture(autouse=True)

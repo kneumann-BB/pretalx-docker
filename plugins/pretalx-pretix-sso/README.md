@@ -47,10 +47,22 @@ except drafts and deleted proposals. Only admission
 products count as tickets (not add-ons or merchandise), and a ticket belongs to
 its named attendee, or to the buyer when no attendee is named. Results are
 cached for 60 minutes; "Refresh from pretix" and the tag sync always fetch fresh
-data. Configure in the same section:
+data. Only the order fields the check uses are requested from pretix.
+
+When pretalx has a celery worker (a `[celery] broker` is configured, as in the
+Docker setup), pretix is never called inside a web request: refreshes and tag
+syncs run as background jobs, one at a time per event, and the page shows the
+last results with their age and updates itself when a job finishes. Without a
+worker, the same work runs within the request instead.
+
+Configure in the same section:
 
 SSO account creation, first-time linking and moved links, ticket overrides and
-tag syncs are recorded in the event's activity log.
+tag syncs (including failed ones) are recorded in the event's activity log.
+
+The plugin's server logs (logins, pretix fetches, tag syncs, ...) go to stdout
+in pretalx's log format, from the web and the celery worker alike, and to
+pretalx's log file. They identify people by pretalx user code only.
 
 Give the API token's team only "Can view orders", and only for the events
 pretalx needs, since the token can read every attendee's details.

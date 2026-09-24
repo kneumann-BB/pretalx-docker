@@ -91,6 +91,17 @@ def display_log_entry(sender, activitylog, **kwargs):
             added=data.get("added", 0),
             removed=data.get("removed", 0),
         )
+    if action == "pretalx_pretix_sso.tag.sync_failed":
+        data = activitylog.json_data or {}
+        if data.get("reason") == "pretix":
+            return gettext(
+                'The "{tag}" tag sync failed: pretix could not be reached or returned '
+                "unexpected data. No tags were changed."
+            ).format(tag=data.get("tag", "needTicket"))
+        return gettext(
+            'The "{tag}" tag sync failed because of an unexpected error. Details are '
+            "in the server log."
+        ).format(tag=data.get("tag", "needTicket"))
     if action == "pretalx_pretix_sso.account.linked":
         if (activitylog.json_data or {}).get("password_disabled"):
             return gettext(
