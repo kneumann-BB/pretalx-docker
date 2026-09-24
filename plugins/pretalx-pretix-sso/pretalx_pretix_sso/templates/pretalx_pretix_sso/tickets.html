@@ -53,7 +53,7 @@
                     <form method="post" class="mr-2">
                         {% csrf_token %}
                         <button type="submit" name="action" value="sync_tag" class="btn btn-outline-info" data-pretix-busy
-                                title="{% blocktranslate trimmed with tag=ticket_tag %}Add the “{{ tag }}” tag to accepted and confirmed proposals where no speaker holds a paid ticket, and remove it from all others.{% endblocktranslate %}">
+                                title="{% blocktranslate trimmed with tag=ticket_tag %}Add the “{{ tag }}” tag to every proposal (all states and types, except drafts) where no speaker holds a paid ticket, and remove it from all others.{% endblocktranslate %}">
                             <i class="fa fa-tag"></i>
                             {% blocktranslate trimmed with tag=ticket_tag %}Sync “{{ tag }}” tag{% endblocktranslate %}
                         </button>

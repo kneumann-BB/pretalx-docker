@@ -76,24 +76,35 @@ def test_override_for_unknown_speaker_is_404(tickets_page):
         tickets_page("post", data={"action": "override_on", "user": "NOPE"})
 
 
-def test_sync_tags_uncovered_accepted_proposals(
+def test_sync_tags_uncovered_proposals_in_every_state_and_type(
     tickets_page, pretix, event, make_speaker, make_proposal
 ):
+    from pretalx.submission.models import Submission, SubmissionType
+
     paid = make_speaker("paid@example.invalid")
     comp = make_speaker("comp@example.invalid")
     nobody = make_speaker("nobody@example.invalid")
     make_proposal("Paid", "accepted", paid)
     make_proposal("Comp", "confirmed", comp)
-    make_proposal("Uncovered", "accepted", nobody)
-    make_proposal("Submitted", "submitted", nobody)
-    make_proposal("Rejected", "rejected", nobody)
     make_proposal("Shared", "accepted", nobody, paid)
+    for state in ("submitted", "accepted", "confirmed", "rejected", "withdrawn", "canceled"):
+        make_proposal(f"Uncovered {state}", state, nobody)
+    workshop = make_proposal("Uncovered workshop", "accepted", nobody)
+    workshop.submission_type = SubmissionType.objects.create(event=event, name="Workshop")
+    workshop.save()
+    draft = make_proposal("Draft", "draft", nobody)
     TicketOverride.objects.create(event=event, user=comp)
     pretix.return_value = _holders(emails={"paid@example.invalid"})
 
     _, messages = tickets_page("post", data={"action": "sync_tag"})
-    assert _tagged(event) == {"Uncovered"}
-    assert "added to 1" in messages[-1]
+    expected = {
+        "Uncovered submitted", "Uncovered accepted", "Uncovered confirmed",
+        "Uncovered rejected", "Uncovered withdrawn", "Uncovered canceled",
+        "Uncovered workshop",
+    }
+    assert _tagged(event) == expected
+    assert f"added to {len(expected)}" in messages[-1]
+    assert not Submission.all_objects.get(pk=draft.pk).tags.exists()  # drafts untouched
     assert ActivityLog.objects.filter(action_type="pretalx_pretix_sso.tag.synced").exists()
 
     # the tag comes off again once the speaker is covered

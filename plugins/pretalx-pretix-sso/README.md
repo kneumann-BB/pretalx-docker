@@ -42,7 +42,8 @@ whether they hold a paid order in the pretix event with the same slug. Speakers
 are matched first by the pretix account they last logged in with (linked on
 each SSO login), then by order or attendee email. Organisers can mark a speaker
 as covered (e.g. a complimentary ticket), and sync a `needTicket` tag onto
-accepted/confirmed proposals where no speaker is covered. Only admission
+every proposal where no speaker is covered: all states and submission types,
+except drafts and deleted proposals. Only admission
 products count as tickets (not add-ons or merchandise), and a ticket belongs to
 its named attendee, or to the buyer when no attendee is named. Results are
 cached for 60 minutes; "Refresh from pretix" and the tag sync always fetch fresh

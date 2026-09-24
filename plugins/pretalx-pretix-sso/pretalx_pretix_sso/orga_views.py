@@ -132,15 +132,13 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             submissions = event.submissions.prefetch_related(
                 "speakers__pretix_customer"
             )
+            # Every proposal in any state and of any submission type (pretalx
+            # already leaves out drafts and deleted ones) needs a ticket until
+            # any of its speakers is covered
             for submission in submissions:
-                # Only accepted/confirmed proposals need a ticket, and only until
-                # any of their speakers is covered
-                needs_ticket = (
-                    submission.state in SubmissionStates.accepted_states
-                    and not any(
-                        holders.status(speaker, speaker.pk in overridden)
-                        for speaker in submission.speakers.all()
-                    )
+                needs_ticket = not any(
+                    holders.status(speaker, speaker.pk in overridden)
+                    for speaker in submission.speakers.all()
                 )
                 if needs_ticket and submission.pk not in tagged:
                     submission.tags.add(tag)
