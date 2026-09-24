@@ -8,6 +8,7 @@ iss, aud, exp and nonce.
 import base64
 import hashlib
 import json
+import os
 import secrets
 import time
 
@@ -22,20 +23,30 @@ class OIDCError(Exception):
     pass
 
 
+ENV_PREFIX = "PRETALX_PRETIX_SSO_"
+
+
+def _setting(conf, key, default=""):
+    """Read a setting from the environment (PRETALX_PRETIX_SSO_<KEY>), falling
+    back to the [plugin:pretalx_pretix_sso] section of pretalx.cfg. Keeps secrets
+    such as client_secret and api_token out of config files."""
+    return os.environ.get(ENV_PREFIX + key.upper()) or conf.get(key, default)
+
+
 def get_config():
     conf = settings.PLUGIN_SETTINGS.get("pretalx_pretix_sso", {})
     return {
-        "issuer": conf.get("issuer", "").rstrip("/"),
-        "client_id": conf.get("client_id", ""),
-        "client_secret": conf.get("client_secret", ""),
-        "scope": conf.get("scope", "openid email profile"),
-        "pretix_url": conf.get("pretix_url", ""),
-        "organizer": conf.get("organizer", ""),
-        "api_token": conf.get("api_token", ""),
+        "issuer": _setting(conf, "issuer").rstrip("/"),
+        "client_id": _setting(conf, "client_id"),
+        "client_secret": _setting(conf, "client_secret"),
+        "scope": _setting(conf, "scope", "openid email profile"),
+        "pretix_url": _setting(conf, "pretix_url"),
+        "organizer": _setting(conf, "organizer"),
+        "api_token": _setting(conf, "api_token"),
         # "pretalx-slug=pretix-slug, other=other-pretix"
         "event_map": dict(
             (part.strip() for part in pair.split("=", 1))
-            for pair in conf.get("event_map", "").split(",")
+            for pair in _setting(conf, "event_map").split(",")
             if "=" in pair
         ),
     }

@@ -1,6 +1,13 @@
 volumes/
 .DS_Store
 
+# Local secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+
 # Terraform
 .terraform/
 *.tfstate

@@ -318,6 +318,19 @@ variable "pretix_sso_client_secret" {
   sensitive   = true
 }
 
+variable "pretix_api_token" {
+  description = "pretix team API token (read access to orders) used to show which speakers hold a paid ticket."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "pretix_event_map" {
+  description = "pretalx event slug -> pretix event slug, for events whose slugs differ. Other events use the same slug."
+  type        = map(string)
+  default     = {}
+}
+
 variable "extra_pretalx_config" {
   description = "Additional lines appended to pretalx.cfg."
   type        = string

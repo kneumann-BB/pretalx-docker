@@ -25,11 +25,13 @@ COPY pretalx/pyproject.toml /pretalx
 COPY pretalx/src /pretalx/src
 COPY deployment/docker/pretalx.bash /usr/local/bin/pretalx
 COPY deployment/docker/supervisord.conf /etc/supervisord.conf
+COPY plugins /plugins
 
-RUN pip3 install -U pip setuptools wheel typing && \
+RUN pip3 install -U pip "setuptools<81" wheel typing && \
     pip3 install -e /pretalx/[mysql,postgres,redis] && \
     pip3 install pylibmc && \
-    pip3 install gunicorn
+    pip3 install gunicorn && \
+    pip3 install /plugins/pretalx-pretix-sso
 
 
 RUN python3 -m pretalx makemigrations

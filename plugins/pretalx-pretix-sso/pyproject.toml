@@ -20,3 +20,11 @@ include = ["pretalx_pretix_sso*"]
 
 [tool.setuptools.package-data]
 pretalx_pretix_sso = ["static/**/*", "templates/**/*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "pretix_sso_test_settings"
+pythonpath = ["tests"]
+testpaths = ["tests"]
+# Runs real migrations, so the plugin's migration is exercised too
+addopts = "-p no:cacheprovider"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::RuntimeWarning"]

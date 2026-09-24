@@ -12,6 +12,9 @@ services:
       # Hint: Make sure you serve all requests for the `/static/` and `/media/` paths when debug is False. See [installation](https://docs.pretalx.org/administrator/installation/#step-7-ssl) for more information
       PRETALX_FILESYSTEM_MEDIA: /public/media
       PRETALX_FILESYSTEM_STATIC: /public/static
+      # pretix SSO secrets, read from .env (see .env.example)
+      PRETALX_PRETIX_SSO_CLIENT_SECRET: ${PRETALX_PRETIX_SSO_CLIENT_SECRET:-}
+      PRETALX_PRETIX_SSO_API_TOKEN: ${PRETALX_PRETIX_SSO_API_TOKEN:-}
     ports:
       - "80:80"
     volumes:

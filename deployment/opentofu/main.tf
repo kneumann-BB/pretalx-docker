@@ -61,6 +61,8 @@ locals {
       issuer        = var.pretix_sso_issuer
       client_id     = var.pretix_sso_client_id
       client_secret = var.pretix_sso_client_secret
+      api_token     = var.pretix_api_token
+      event_map     = join(", ", [for k, v in var.pretix_event_map : "${k}=${v}"])
     }
   })
 

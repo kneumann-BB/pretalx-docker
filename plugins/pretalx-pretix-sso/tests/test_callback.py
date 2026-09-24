@@ -1,0 +1,142 @@
+from unittest import mock
+
+import pytest
+from django.db import IntegrityError
+from django.http import Http404
+
+from pretalx.person.models import User
+from pretalx_pretix_sso import views
+from pretalx_pretix_sso.models import PretixCustomer
+
+
+def _userinfo(sub="CUST1", email="new@example.invalid", verified=True, **extra):
+    info = {"sub": sub, "email": email, **extra}
+    if verified is not None:
+        info["email_verified"] = verified
+    return info
+
+
+def test_redirect_uri_comes_from_site_url_not_request():
+    assert views._redirect_uri() == "https://pretalx.example.invalid/p/pretix-sso/callback/"
+
+
+def test_new_user_is_created_linked_and_logged_in(sso_callback, event):
+    response, request = sso_callback(_userinfo(name="New Person"))
+    user = User.objects.get(email="new@example.invalid")
+    assert request.user == user
+    assert user.name == "New Person"
+    assert not user.has_usable_password()
+    assert PretixCustomer.objects.get(user=user).identifier == "CUST1"
+    assert response.url == event.urls.user_submissions
+    # the token exchange used the configured redirect URI
+    assert request.fetch.call_args.args[1] == views._redirect_uri()
+
+
+@pytest.mark.parametrize("verified", [None, False])
+def test_unverified_email_is_refused(sso_callback, verified):
+    _, request = sso_callback(_userinfo(verified=verified))
+    assert not request.user.is_authenticated
+    assert not User.objects.filter(email="new@example.invalid").exists()
+
+
+def test_linked_account_survives_pretix_email_change(sso_callback):
+    sso_callback(_userinfo())
+    user = User.objects.get(email="new@example.invalid")
+    _, request = sso_callback(_userinfo(email="changed@example.invalid"))
+    assert request.user == user
+    assert not User.objects.filter(email="changed@example.invalid").exists()
+
+
+def test_first_link_by_email_disables_existing_password(sso_callback, make_speaker):
+    squatter = make_speaker("victim@example.invalid", password="attacker-knows-this")
+    _, request = sso_callback(_userinfo(sub="V1", email="victim@example.invalid"))
+    squatter.refresh_from_db()
+    assert request.user == squatter
+    assert not squatter.has_usable_password()
+    assert PretixCustomer.objects.get(user=squatter).identifier == "V1"
+
+
+def test_password_set_after_linking_is_kept(sso_callback, make_speaker):
+    speaker = make_speaker("victim@example.invalid", password="old")
+    sso_callback(_userinfo(sub="V1", email="victim@example.invalid"))
+    speaker.set_password("reset-by-owner")
+    speaker.save()
+    sso_callback(_userinfo(sub="V1", email="victim@example.invalid"))
+    speaker.refresh_from_db()
+    assert speaker.check_password("reset-by-owner")
+
+
+def test_organiser_is_refused_and_untouched(sso_callback, admin):
+    _, request = sso_callback(_userinfo(sub="ADM", email=admin.email))
+    admin.refresh_from_db()
+    assert not request.user.is_authenticated
+    assert admin.check_password("admin-pw")
+    assert not PretixCustomer.objects.filter(identifier="ADM").exists()
+
+
+def test_team_member_is_refused(sso_callback, event, make_speaker):
+    from pretalx.event.models import Team
+
+    reviewer = make_speaker("reviewer@example.invalid")
+    team = Team.objects.create(organiser=event.organiser, name="Reviewers", is_reviewer=True)
+    team.members.add(reviewer)
+    _, request = sso_callback(_userinfo(email="reviewer@example.invalid"))
+    assert not request.user.is_authenticated
+
+
+def test_deactivated_user_is_refused(sso_callback, make_speaker):
+    speaker = make_speaker("gone@example.invalid")
+    speaker.is_active = False
+    speaker.save()
+    _, request = sso_callback(_userinfo(email="gone@example.invalid"))
+    assert not request.user.is_authenticated
+
+
+def test_concurrent_creation_reuses_the_other_account(sso_callback):
+    # The other request committed the user; our lookup ran just before that
+    other = User.objects.create_user(email="new@example.invalid", password=None, name="Other")
+    real_filter = User.objects.filter
+    calls = []
+
+    def first_lookup_misses(*args, **kwargs):
+        calls.append(1)
+        return User.objects.none() if len(calls) == 1 else real_filter(*args, **kwargs)
+
+    with mock.patch.object(User.objects, "filter", side_effect=first_lookup_misses):
+        _, request = sso_callback(_userinfo())
+    assert request.user == other
+    assert User.objects.filter(email="new@example.invalid").count() == 1
+
+
+def test_integrity_error_without_existing_user_is_raised(sso_callback):
+    with mock.patch.object(
+        User.objects, "create_user", side_effect=IntegrityError("other constraint")
+    ), pytest.raises(IntegrityError):
+        sso_callback(_userinfo())
+
+
+def test_state_mismatch_is_refused(sso_callback):
+    _, request = sso_callback(_userinfo(), state="forged")
+    assert not request.user.is_authenticated
+    request.fetch.assert_not_called()
+
+
+def test_next_url_must_be_local(sso_callback, event):
+    response, _ = sso_callback(_userinfo(), next_url="https://evil.example.invalid/")
+    assert response.url == event.urls.user_submissions
+
+
+def test_callback_without_session_is_404(rf):
+    from django.contrib.sessions.backends.cache import SessionStore
+
+    request = rf.get("/p/pretix-sso/callback/")
+    request.session = SessionStore()
+    with pytest.raises(Http404):
+        views.CallbackView.as_view()(request)
+
+
+def test_callback_for_disabled_plugin_is_404(sso_callback, event):
+    event.disable_plugin("pretalx_pretix_sso")
+    event.save()
+    with pytest.raises(Http404):
+        sso_callback(_userinfo())

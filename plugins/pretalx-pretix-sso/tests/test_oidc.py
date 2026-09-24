@@ -1,0 +1,113 @@
+import base64
+import json
+import time
+from unittest import mock
+
+import pytest
+
+from pretalx_pretix_sso import oidc
+
+ISSUER = "https://pretix.example.invalid/org"
+
+
+def _jwt(claims):
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode()
+    return f"header.{payload.rstrip('=')}.signature"
+
+
+def _claims(**overrides):
+    claims = {
+        "iss": ISSUER,
+        "aud": "test-client",
+        "exp": time.time() + 60,
+        "nonce": "nonce",
+        "sub": "CUST1",
+    }
+    claims.update(overrides)
+    return {k: v for k, v in claims.items() if v is not None}
+
+
+def _fetch(claims, userinfo=None, token_status=200, discovery_issuer=ISSUER):
+    token = mock.Mock(status_code=token_status)
+    token.json.return_value = {"id_token": _jwt(claims), "access_token": "access"}
+    info = mock.Mock(status_code=200)
+    info.json.return_value = userinfo if userinfo is not None else {"sub": "CUST1"}
+    meta = {
+        "issuer": discovery_issuer,
+        "token_endpoint": f"{ISSUER}/token",
+        "userinfo_endpoint": f"{ISSUER}/userinfo",
+    }
+    with mock.patch.object(oidc, "discovery", return_value=meta), mock.patch.object(
+        oidc.requests, "post", return_value=token
+    ) as post, mock.patch.object(oidc.requests, "get", return_value=info):
+        result = oidc.fetch_userinfo("code", "https://cb", "nonce", "verifier")
+    return result, post
+
+
+def test_valid_token_returns_userinfo_and_uses_client_secret_post():
+    userinfo, post = _fetch(_claims(), {"sub": "CUST1", "email": "a@example.invalid"})
+    assert userinfo["email"] == "a@example.invalid"
+    sent = post.call_args.kwargs
+    assert sent["data"]["client_secret"] == "test-secret"
+    assert "auth" not in sent  # Basic auth does not reach pretix through its proxy
+
+
+def test_issuer_with_trailing_slash_is_accepted():
+    _fetch(_claims(iss=ISSUER + "/"))
+
+
+@pytest.mark.parametrize(
+    "claims, message",
+    [
+        (_claims(iss="https://evil.example.invalid/org"), "issuer"),
+        (_claims(aud="other-client"), "audience"),
+        (_claims(exp=time.time() - 1), "expired"),
+        (_claims(nonce="other"), "nonce"),
+        (_claims(sub=None), "subject"),
+    ],
+)
+def test_invalid_id_token_is_rejected(claims, message):
+    with pytest.raises(oidc.OIDCError, match=message):
+        _fetch(claims)
+
+
+def test_issuer_is_checked_against_config_not_discovery():
+    evil = "https://evil.example.invalid/org"
+    with pytest.raises(oidc.OIDCError, match="issuer"):
+        _fetch(_claims(iss=evil), discovery_issuer=evil)
+
+
+def test_userinfo_subject_must_match_token():
+    with pytest.raises(oidc.OIDCError, match="subject"):
+        _fetch(_claims(), {"sub": "SOMEONE-ELSE"})
+
+
+def test_token_endpoint_error_is_rejected():
+    with pytest.raises(oidc.OIDCError, match="400"):
+        _fetch(_claims(), token_status=400)
+
+
+def test_pkce_challenge_matches_verifier():
+    import hashlib
+
+    verifier, challenge = oidc.new_pkce_pair()
+    expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+    assert challenge == expected.rstrip(b"=").decode()
+
+
+def test_environment_overrides_config_file(monkeypatch):
+    assert oidc.get_config()["client_secret"] == "test-secret"
+    monkeypatch.setenv("PRETALX_PRETIX_SSO_CLIENT_SECRET", "from-env")
+    assert oidc.get_config()["client_secret"] == "from-env"
+
+
+def test_event_map_parsing(settings, monkeypatch):
+    monkeypatch.setenv("PRETALX_PRETIX_SSO_EVENT_MAP", "a=b, c = d ,broken")
+    assert oidc.get_config()["event_map"] == {"a": "b", "c": "d"}
+
+
+def test_is_enabled_requires_plugin_on_event(event):
+    assert oidc.is_enabled(event)
+    event.disable_plugin("pretalx_pretix_sso")
+    event.save()
+    assert not oidc.is_enabled(event)

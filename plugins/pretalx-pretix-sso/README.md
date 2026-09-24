@@ -46,3 +46,23 @@ event_map = conf2026=conference-2026
 pretix_url = https://pretix.eu
 organizer = myorg
 ```
+
+## Secrets from the environment
+
+Every setting above can also come from an environment variable named
+`PRETALX_PRETIX_SSO_<SETTING>` (e.g. `PRETALX_PRETIX_SSO_CLIENT_SECRET`,
+`PRETALX_PRETIX_SSO_API_TOKEN`), which takes precedence over `pretalx.cfg`.
+The local docker compose setup reads these from `.env` (see `.env.example` in
+the repository root), so no secret has to live in a config file.
+
+## Tests
+
+```sh
+./run-tests.sh            # all tests, inside the pretalx-sso:latest image
+./run-tests.sh -k tickets # a subset; any pytest arguments work
+```
+
+The tests run against this source tree with a throwaway SQLite database; pretix
+is mocked. `tests/test_restrict.py` goes through pretalx's full request stack,
+so run the suite after every pretalx upgrade: it is what notices when the
+patched pretalx internals change.
