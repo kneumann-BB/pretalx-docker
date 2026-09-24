@@ -1,6 +1,7 @@
 """Server logs: the plugin's actions are traceable, without personal data."""
 
 import logging
+import re
 from unittest import mock
 
 import pytest
@@ -84,7 +85,7 @@ def test_ticket_fetch_is_logged_with_counts_and_cache_hits(event, plugin_logs):
         tickets.ticket_holders(event)
     logs = plugin_logs()
     assert any("Fetching pretix tickets" in m and "not cached" in m for m in logs)
-    assert any("Fetched pretix tickets" in m and "s" in m for m in logs)
+    assert any(re.search(r"Fetched pretix tickets for event \S+ in \d+\.\ds$", m) for m in logs)
     assert any("served from cache" in m for m in logs)
 
 
