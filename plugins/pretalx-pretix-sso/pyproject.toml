@@ -1,6 +1,6 @@
 [project]
 name = "pretalx-pretix-sso"
-version = "0.1.0"
+version = "0.2.0"
 description = "Log in to the pretalx CfP with a pretix customer account (OpenID Connect)"
 requires-python = ">=3.10"
 dependencies = ["requests"]

@@ -1,0 +1,51 @@
+name: pretix SSO plugin tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'plugins/**'
+      - 'pretalx'
+      - 'Dockerfile'
+      - 'deployment/docker/**'
+      - '.github/workflows/plugin-tests.yml'
+  pull_request:
+    paths:
+      - 'plugins/**'
+      - 'pretalx'
+      - 'Dockerfile'
+      - 'deployment/docker/**'
+      - '.github/workflows/plugin-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build image and run plugin tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # The tests run inside the real image, so they see the same pretalx
+      # version and dependencies as production
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: pretalx-sso:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run plugin tests
+        run: plugins/pretalx-pretix-sso/run-tests.sh -p no:warnings

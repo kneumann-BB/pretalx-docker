@@ -111,3 +111,61 @@ def test_is_enabled_requires_plugin_on_event(event):
     event.disable_plugin("pretalx_pretix_sso")
     event.save()
     assert not oidc.is_enabled(event)
+
+
+def _token_response(json_value=None, bad_json=False):
+    response = mock.Mock(status_code=200)
+    if bad_json:
+        response.json.side_effect = ValueError("not json")
+    else:
+        response.json.return_value = json_value
+    return response
+
+
+@pytest.mark.parametrize(
+    "token_response",
+    [
+        _token_response(bad_json=True),
+        _token_response(["not", "an", "object"]),
+        _token_response({"id_token": 42, "access_token": "a"}),
+        _token_response({"id_token": _jwt(["claims", "list"]), "access_token": "a"}),
+        _token_response({"id_token": _jwt(_claims(exp="soon")), "access_token": "a"}),
+        _token_response({"id_token": _jwt(_claims())}),  # no access token
+    ],
+)
+def test_malformed_token_response_raises_oidc_error(token_response):
+    meta = {"issuer": ISSUER, "token_endpoint": "t", "userinfo_endpoint": "u"}
+    with mock.patch.object(oidc, "discovery", return_value=meta), mock.patch.object(
+        oidc.requests, "post", return_value=token_response
+    ), pytest.raises(oidc.OIDCError):
+        oidc.fetch_userinfo("code", "https://cb", "nonce", "verifier")
+
+
+def test_malformed_userinfo_raises_oidc_error():
+    token = _token_response({"id_token": _jwt(_claims()), "access_token": "a"})
+    meta = {"issuer": ISSUER, "token_endpoint": "t", "userinfo_endpoint": "u"}
+    info = mock.Mock(status_code=200)
+    info.json.side_effect = ValueError("html error page")
+    with mock.patch.object(oidc, "discovery", return_value=meta), mock.patch.object(
+        oidc.requests, "post", return_value=token
+    ), mock.patch.object(oidc.requests, "get", return_value=info), pytest.raises(
+        oidc.OIDCError
+    ):
+        oidc.fetch_userinfo("code", "https://cb", "nonce", "verifier")
+
+
+@pytest.mark.parametrize(
+    "document", [ValueError("not json"), {"issuer": ISSUER}, ["list"]]
+)
+def test_broken_discovery_raises_oidc_error_and_is_not_cached(document):
+    response = mock.Mock()
+    response.raise_for_status = lambda: None
+    if isinstance(document, Exception):
+        response.json.side_effect = document
+    else:
+        response.json.return_value = document
+    with mock.patch.object(oidc.requests, "get", return_value=response) as get:
+        for _ in range(2):
+            with pytest.raises(oidc.OIDCError):
+                oidc.discovery()
+    assert get.call_count == 2

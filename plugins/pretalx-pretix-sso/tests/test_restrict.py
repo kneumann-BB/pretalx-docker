@@ -90,3 +90,14 @@ def test_migrations_are_up_to_date():
     from django.core.management import call_command
 
     call_command("makemigrations", "pretalx_pretix_sso", "--check", "--dry-run", verbosity=0)
+
+
+def test_plugin_version_comes_from_pyproject():
+    import re
+    from pathlib import Path
+
+    from pretalx_pretix_sso.apps import PluginApp
+
+    pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+    expected = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M).group(1)
+    assert PluginApp.PretalxPluginMeta.version == expected

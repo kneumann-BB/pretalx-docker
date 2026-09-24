@@ -10,5 +10,5 @@ exec docker run --rm \
     -e PYTHONDONTWRITEBYTECODE=1 \
     -w /plugin-src \
     --entrypoint bash "$IMAGE" -c \
-    'pip3 install -q --disable-pip-version-check --target /tmp/testdeps pytest pytest-django >/dev/null \
+    'pip3 install -q --disable-pip-version-check --no-deps --target /tmp/testdeps -r tests/requirements.txt >/dev/null \
      && PYTHONPATH=/plugin-src:/tmp/testdeps python3 -m pytest "$@"' _ "$@"

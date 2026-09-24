@@ -4,6 +4,7 @@ import pytest
 from django.db import IntegrityError
 from django.http import Http404
 
+from conftest import _prepare
 from pretalx.person.models import User
 from pretalx_pretix_sso import views
 from pretalx_pretix_sso.models import PretixCustomer
@@ -140,3 +141,51 @@ def test_callback_for_disabled_plugin_is_404(sso_callback, event):
     event.save()
     with pytest.raises(Http404):
         sso_callback(_userinfo())
+
+
+def test_pretix_error_during_token_exchange_shows_message(event):
+    from pretalx_pretix_sso import oidc
+
+    with mock.patch.object(views.oidc, "fetch_userinfo", side_effect=oidc.OIDCError("bad")):
+        request = _callback_request(event)
+        response = views.CallbackView.as_view()(request)
+    assert response.status_code == 302 and response.url == event.urls.login
+    assert "failed" in " ".join(str(m) for m in request._messages)
+
+
+def test_broken_discovery_on_login_start_shows_message(event):
+    from django.test import RequestFactory
+
+    from pretalx_pretix_sso import oidc
+
+    request = RequestFactory().get(f"/{event.slug}/p/pretix-sso/login/")
+    _prepare(request, event=event)
+    with mock.patch.object(views.oidc, "discovery", side_effect=oidc.OIDCError("broken")):
+        response = views.LoginStartView.as_view()(request, event=event.slug)
+    assert response.status_code == 302 and response.url == event.urls.login
+    assert "unavailable" in " ".join(str(m) for m in request._messages)
+
+
+def test_non_text_email_is_refused(sso_callback):
+    _, request = sso_callback({"sub": "X", "email": ["a@example.invalid"], "email_verified": True})
+    assert not request.user.is_authenticated
+
+
+def test_speaker_is_told_when_password_stops_working(sso_callback, make_speaker):
+    make_speaker("pw@example.invalid", password="old")
+    _, request = sso_callback(_userinfo(sub="P1", email="pw@example.invalid"))
+    assert any("previous password" in str(m) for m in request._messages)
+    # nothing to say for a speaker without a password
+    _, request = sso_callback(_userinfo(sub="P2", email="fresh@example.invalid"))
+    assert not any("previous password" in str(m) for m in request._messages)
+
+
+def _callback_request(event):
+    from django.test import RequestFactory
+
+    request = RequestFactory().get("/p/pretix-sso/callback/", {"state": "st", "code": "c"})
+    _prepare(request)
+    request.session[views.SESSION_KEY] = {
+        "state": "st", "nonce": "n", "verifier": "v", "event": event.slug, "next": "",
+    }
+    return request

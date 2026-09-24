@@ -10,13 +10,37 @@ const showBusy = (el) => {
   el.setAttribute("aria-busy", "true")
   const icon = el.querySelector("i.fa")
   if (icon) {
+    icon.dataset.idleClass = icon.className
     icon.className = SPINNER_CLASS
   } else {
     const spinner = document.createElement("i")
     spinner.className = `${SPINNER_CLASS} mr-1`
+    spinner.dataset.addedSpinner = "1"
     el.prepend(spinner)
   }
 }
+
+const clearBusy = () => {
+  document.querySelectorAll("[data-busy]").forEach((el) => {
+    delete el.dataset.busy
+    el.classList.remove("disabled")
+    el.removeAttribute("aria-busy")
+    el.querySelectorAll("[data-added-spinner]").forEach((spinner) => spinner.remove())
+    el.querySelectorAll("[data-idle-class]").forEach((icon) => {
+      icon.className = icon.dataset.idleClass
+      delete icon.dataset.idleClass
+    })
+  })
+  document.querySelectorAll("form[data-submitting]").forEach((form) => {
+    delete form.dataset.submitting
+  })
+}
+
+// Only plain left clicks navigate this tab; a new-tab click leaves this page idle
+const opensInThisTab = (event, link) =>
+  event.button === 0 &&
+  !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) &&
+  (!link.target || link.target === "_self")
 
 const showError = (container) => {
   const alert = document.createElement("div")
@@ -70,6 +94,12 @@ document.addEventListener("DOMContentLoaded", () => {
   })
   document.addEventListener("click", (event) => {
     const link = event.target.closest("a[data-pretix-busy]")
-    if (link) showBusy(link)
+    if (link && !event.defaultPrevented && opensInThisTab(event, link)) showBusy(link)
   })
+})
+
+// Coming back via the back/forward cache restores the page as it was left,
+// spinners included
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) clearBusy()
 })

@@ -63,6 +63,8 @@ the repository root), so no secret has to live in a config file.
 ```
 
 The tests run against this source tree with a throwaway SQLite database; pretix
-is mocked. `tests/test_restrict.py` goes through pretalx's full request stack,
+is mocked. Test dependencies are pinned in `tests/requirements.txt`. CI
+(`.github/workflows/plugin-tests.yml`) builds the image and runs the suite on
+every push that touches the plugin, pretalx or the Dockerfile. `tests/test_restrict.py` goes through pretalx's full request stack,
 so run the suite after every pretalx upgrade: it is what notices when the
 patched pretalx internals change.

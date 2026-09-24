@@ -55,7 +55,7 @@ class LoginStartView(View):
         }
         try:
             url = oidc.authorization_url(_redirect_uri(), state, nonce, challenge)
-        except requests.RequestException:
+        except (requests.RequestException, oidc.OIDCError):
             logger.exception("pretix SSO discovery failed")
             messages.error(request, _("Login with pretix is currently unavailable."))
             return redirect(event.urls.login)
@@ -87,11 +87,12 @@ class CallbackView(View):
             userinfo = oidc.fetch_userinfo(
                 code, _redirect_uri(), data["nonce"], data["verifier"]
             )
-        except (oidc.OIDCError, requests.RequestException, ValueError, KeyError):
+        except (oidc.OIDCError, requests.RequestException):
             logger.exception("pretix SSO token exchange failed")
             return fail(_("Login with pretix failed, please try again."))
 
-        email = (userinfo.get("email") or "").strip().lower()
+        email = userinfo.get("email")
+        email = email.strip().lower() if isinstance(email, str) else ""
         # Accounts are matched by email, so only trust addresses pretix has verified
         if not email or userinfo.get("email_verified") is not True:
             return fail(_("Your pretix account has no verified email address."))
@@ -131,7 +132,8 @@ class CallbackView(View):
         # first link by email, drop the password so only the pretix owner can get
         # in (a password reset to the verified address still works).
         first_link = not link and not PretixCustomer.objects.filter(user=user).exists()
-        if first_link and user.has_usable_password():
+        password_disabled = first_link and user.has_usable_password()
+        if password_disabled:
             user.set_unusable_password()
             user.save(update_fields=["password"])
             logger.info("Disabled password of user %s on first pretix SSO link", user.code)
@@ -143,6 +145,15 @@ class CallbackView(View):
         )
 
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        if password_disabled:
+            messages.info(
+                request,
+                _(
+                    "Your account is now linked to your pretix account, so please log "
+                    "in with pretix from now on. Your previous password no longer "
+                    "works; use “Forgot password” if you need one."
+                ),
+            )
         if data["next"] and url_has_allowed_host_and_scheme(
             data["next"], allowed_hosts={request.get_host()}
         ):
