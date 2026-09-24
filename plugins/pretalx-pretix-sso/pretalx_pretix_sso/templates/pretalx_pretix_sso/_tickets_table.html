@@ -1,0 +1,75 @@
+{% load i18n %}
+{% if load_error %}
+    <div class="alert alert-danger">
+        {% translate "Could not load orders from pretix." %}
+        <a href="?refresh=1{% if only_accepted %}&accepted=1{% endif %}" class="alert-link">{% translate "Try again" %}</a>
+    </div>
+{% else %}
+    {% if rows %}
+        <p>
+            {% blocktranslate trimmed count count=missing_count %}
+                {{ count }} speaker without a ticket.
+            {% plural %}
+                {{ count }} speakers without a ticket.
+            {% endblocktranslate %}
+        </p>
+    {% endif %}
+    <div class="table-responsive-md">
+        <table class="table table-sm table-hover table-flip table-sticky">
+            <thead>
+                <tr>
+                    <th>{% translate "Name" %}</th>
+                    <th>{% translate "Email" %}</th>
+                    <th>{% translate "Accepted sessions" %}</th>
+                    <th>{% translate "Ticket" %}</th>
+                    {% if can_edit %}<th></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td><a href="{{ row.profile.orga_urls.base }}">{{ row.profile.user.get_display_name }}</a></td>
+                        <td>
+                            {{ row.profile.user.email }}
+                            {% if row.linked %}
+                                <i class="fa fa-link text-muted" title="{% translate "Linked to a pretix account" %}"></i>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.profile.accepted_count }}</td>
+                        <td>
+                            {% if row.status == "account" %}
+                                <span class="badge color-success" title="{% translate "Paid order placed with their pretix account" %}"><i class="fa fa-check"></i> {% translate "Paid" %}</span>
+                            {% elif row.status == "email" %}
+                                <span class="badge color-success" title="{% translate "Paid order with a matching order or attendee email" %}"><i class="fa fa-check"></i> {% translate "Paid (email)" %}</span>
+                            {% elif row.status == "override" %}
+                                <span class="badge color-info" title="{% translate "Marked as covered by an organiser" %}"><i class="fa fa-check"></i> {% translate "Covered" %}</span>
+                            {% else %}
+                                <span class="badge color-danger"><i class="fa fa-times"></i> {% translate "None" %}</span>
+                            {% endif %}
+                        </td>
+                        {% if can_edit %}
+                            <td class="text-right">
+                                <form method="post">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="user" value="{{ row.profile.user.code }}">
+                                    {% if row.overridden %}
+                                        <button type="submit" name="action" value="override_off" class="btn btn-sm btn-outline-danger" data-pretix-busy>
+                                            {% translate "Remove override" %}
+                                        </button>
+                                    {% elif not row.status %}
+                                        <button type="submit" name="action" value="override_on" class="btn btn-sm btn-outline-info" data-pretix-busy
+                                                title="{% translate "e.g. a complimentary ticket, or one bought under another email address" %}">
+                                            {% translate "Mark as covered" %}
+                                        </button>
+                                    {% endif %}
+                                </form>
+                            </td>
+                        {% endif %}
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="{% if can_edit %}5{% else %}4{% endif %}">{% translate "No speakers yet." %}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endif %}

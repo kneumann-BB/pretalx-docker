@@ -1,6 +1,6 @@
 services:
   pretalx:
-    image: pretalx/standalone:latest
+    image: pretalx-sso:latest
     # image: pretalx/dev
     # build: .
     container_name: pretalx
