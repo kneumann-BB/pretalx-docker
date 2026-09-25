@@ -127,13 +127,37 @@ resource "aws_ecr_repository" "pretalx" {
   }
 }
 
+resource "aws_ecr_lifecycle_policy" "pretalx" {
+  repository = aws_ecr_repository.pretalx.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep only the most recent images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = var.ecr_keep_image_count
+        }
+        action = { type = "expire" }
+      }
+    ]
+  })
+}
+
 resource "aws_ecs_cluster" "pretalx" {
   name = local.identifier
 
   setting {
     name  = "containerInsights"
-    value = "enabled"
+    value = var.container_insights_enabled ? "enabled" : "disabled"
   }
+}
+
+resource "aws_ecs_cluster_capacity_providers" "pretalx" {
+  cluster_name       = aws_ecs_cluster.pretalx.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 }
 
 resource "aws_cloudwatch_log_group" "web_app" {
@@ -253,6 +277,7 @@ resource "aws_db_instance" "postgres" {
   engine_version             = var.postgres_engine_version
   instance_class             = var.postgres_instance_class
   allocated_storage          = var.postgres_allocated_storage
+  storage_type               = "gp3"
   db_name                    = var.postgres_db_name
   username                   = var.postgres_username
   password                   = local.db_password
@@ -822,9 +847,9 @@ resource "aws_ecs_service" "web" {
   health_check_grace_period_seconds = 300
 
   network_configuration {
-    subnets          = local.private_subnet_ids
+    subnets          = local.task_subnet_ids
     security_groups  = [aws_security_group.app.id]
-    assign_public_ip = false
+    assign_public_ip = local.task_public_ip
   }
 
   load_balancer {
@@ -846,20 +871,26 @@ resource "aws_ecs_service" "worker" {
   cluster                = aws_ecs_cluster.pretalx.id
   task_definition        = aws_ecs_task_definition.worker.arn
   desired_count          = var.worker_desired_count
-  launch_type            = "FARGATE"
   platform_version       = "LATEST"
   enable_execute_command = true
 
+  capacity_provider_strategy {
+    capacity_provider = var.worker_use_fargate_spot ? "FARGATE_SPOT" : "FARGATE"
+    weight            = 1
+  }
+
   network_configuration {
-    subnets          = local.private_subnet_ids
+    subnets          = local.task_subnet_ids
     security_groups  = [aws_security_group.app.id]
-    assign_public_ip = false
+    assign_public_ip = local.task_public_ip
   }
 
   deployment_circuit_breaker {
     enable   = true
     rollback = true
   }
+
+  depends_on = [aws_ecs_cluster_capacity_providers.pretalx]
 }
 
 resource "aws_appautoscaling_target" "web" {
@@ -952,9 +983,9 @@ resource "aws_scheduler_schedule" "cron" {
       task_count          = 1
 
       network_configuration {
-        subnets          = local.private_subnet_ids
+        subnets          = local.task_subnet_ids
         security_groups  = [aws_security_group.app.id]
-        assign_public_ip = false
+        assign_public_ip = local.task_public_ip
       }
     }
   }

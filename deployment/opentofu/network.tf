@@ -6,11 +6,16 @@ locals {
   create_vpc = var.vpc_id == null
 
   azs       = local.create_vpc ? slice(data.aws_availability_zones.available[0].names, 0, var.vpc_az_count) : []
-  nat_count = local.create_vpc ? (var.single_nat_gateway ? 1 : var.vpc_az_count) : 0
+  nat_count = local.create_vpc && var.nat_gateway_enabled ? (var.single_nat_gateway ? 1 : var.vpc_az_count) : 0
 
   vpc_id             = local.create_vpc ? aws_vpc.pretalx[0].id : var.vpc_id
   public_subnet_ids  = local.create_vpc ? aws_subnet.public[*].id : var.public_subnet_ids
   private_subnet_ids = local.create_vpc ? aws_subnet.private[*].id : var.private_subnet_ids
+
+  # Without NAT, tasks need a public IP in a public subnet to reach ECR, SES, etc.
+  tasks_public    = local.create_vpc && !var.nat_gateway_enabled
+  task_subnet_ids = local.tasks_public ? local.public_subnet_ids : local.private_subnet_ids
+  task_public_ip  = local.tasks_public
 }
 
 data "aws_availability_zones" "available" {
@@ -119,9 +124,13 @@ resource "aws_route_table" "private" {
 
   vpc_id = aws_vpc.pretalx[0].id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.pretalx[var.single_nat_gateway ? 0 : count.index].id
+  dynamic "route" {
+    for_each = var.nat_gateway_enabled ? [1] : []
+
+    content {
+      cidr_block     = "0.0.0.0/0"
+      nat_gateway_id = aws_nat_gateway.pretalx[var.single_nat_gateway ? 0 : count.index].id
+    }
   }
 
   tags = {

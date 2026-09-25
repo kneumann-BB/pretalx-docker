@@ -65,6 +65,12 @@ variable "vpc_az_count" {
   }
 }
 
+variable "nat_gateway_enabled" {
+  description = "Create NAT gateway(s) so ECS tasks run in private subnets. When false, ECS tasks run in the public subnets with public IPs (ingress is still limited to the ALB), avoiding NAT hourly and data charges. RDS, ElastiCache and EFS stay private either way. Only used when vpc_id is null."
+  type        = bool
+  default     = false
+}
+
 variable "single_nat_gateway" {
   description = "Use one shared NAT gateway instead of one per AZ. Cheaper, but private egress depends on a single AZ. Only used when vpc_id is null."
   type        = bool
@@ -79,7 +85,7 @@ variable "image_tag" {
 variable "container_cpu_architecture" {
   description = "CPU architecture for ECS tasks. Valid values are X86_64 and ARM64."
   type        = string
-  default     = "X86_64"
+  default     = "ARM64"
 
   validation {
     condition     = contains(["X86_64", "ARM64"], var.container_cpu_architecture)
@@ -169,13 +175,13 @@ variable "postgres_password" {
 variable "postgres_instance_class" {
   description = "RDS instance class for PostgreSQL."
   type        = string
-  default     = "db.t4g.medium"
+  default     = "db.t4g.micro"
 }
 
 variable "postgres_allocated_storage" {
   description = "Allocated storage in GiB for PostgreSQL."
   type        = number
-  default     = 30
+  default     = 20
 }
 
 variable "postgres_engine_version" {
@@ -199,7 +205,7 @@ variable "skip_final_snapshot" {
 variable "redis_node_type" {
   description = "ElastiCache node type for Redis."
   type        = string
-  default     = "cache.t4g.small"
+  default     = "cache.t4g.micro"
 }
 
 variable "redis_engine_version" {
@@ -224,37 +230,55 @@ variable "redis_auth_token" {
 variable "web_task_cpu" {
   description = "CPU units for the web task definition."
   type        = number
-  default     = 1024
+  default     = 512
 }
 
 variable "web_task_memory" {
   description = "Memory in MiB for the web task definition."
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "worker_task_cpu" {
   description = "CPU units for the worker task definition."
   type        = number
-  default     = 1024
+  default     = 512
 }
 
 variable "worker_task_memory" {
   description = "Memory in MiB for the worker task definition."
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "cron_task_cpu" {
   description = "CPU units for the cron task definition."
   type        = number
-  default     = 512
+  default     = 256
 }
 
 variable "cron_task_memory" {
   description = "Memory in MiB for the cron task definition."
   type        = number
-  default     = 1024
+  default     = 512
+}
+
+variable "worker_use_fargate_spot" {
+  description = "Run the Celery worker on Fargate Spot (about 70% cheaper; tasks may be interrupted with a 2 minute warning)."
+  type        = bool
+  default     = true
+}
+
+variable "container_insights_enabled" {
+  description = "Enable ECS Container Insights (billed as custom CloudWatch metrics)."
+  type        = bool
+  default     = false
+}
+
+variable "ecr_keep_image_count" {
+  description = "Number of most recent images to keep in ECR; older images are expired."
+  type        = number
+  default     = 10
 }
 
 variable "web_desired_count" {
@@ -290,7 +314,7 @@ variable "web_cpu_target" {
 variable "log_retention_days" {
   description = "CloudWatch log retention in days."
   type        = number
-  default     = 30
+  default     = 14
 }
 
 variable "nginx_image" {

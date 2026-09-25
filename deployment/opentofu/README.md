@@ -4,12 +4,12 @@ This OpenTofu stack deploys pretalx on standard AWS ECS Fargate.
 
 It provisions:
 
-- a VPC with public/private subnets, NAT, and an S3 gateway endpoint (unless an existing `vpc_id` is supplied)
+- a VPC with public/private subnets and an S3 gateway endpoint (unless an existing `vpc_id` is supplied). NAT is off by default (`nat_gateway_enabled`); ECS tasks then run in the public subnets with public IPs, while RDS, ElastiCache and EFS stay private
 - an ECR repository for the pretalx image
 - an ECS cluster
 - an internet-facing ALB with ACM and Route53 DNS
 - an ECS web service with an nginx sidecar
-- an ECS worker service for Celery
+- an ECS worker service for Celery (on Fargate Spot by default, `worker_use_fargate_spot`)
 - an EventBridge Scheduler job for `pretalx cron`
 - an RDS PostgreSQL instance
 - an ElastiCache Redis replication group
@@ -76,6 +76,10 @@ State is stored in S3 with S3-native locking (`use_lockfile`, via a `.tflock` ob
 5. Build and push the image to the ECR repository URL shown in the outputs.
 
 6. Re-run OpenTofu if you changed `image_tag`, or force a new deployment for the ECS services after pushing the tag.
+
+## Cost defaults
+
+Defaults are sized for a small deployment: ARM64 Fargate tasks (0.5 vCPU / 1 GiB web and worker), `db.t4g.micro` with 20 GiB gp3, `cache.t4g.micro`, no NAT gateway, Container Insights off, 14-day log retention, and an ECR lifecycle policy. For production, consider `nat_gateway_enabled = true`, `worker_use_fargate_spot = false`, and larger instance classes. The image must be built for `linux/arm64` unless you set `container_cpu_architecture = "X86_64"`.
 
 ## Bootstrap behavior
 
