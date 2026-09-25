@@ -2,20 +2,21 @@ import logging
 import time
 
 from django.contrib import messages
-from django.db.models import Count, Q
 from django.http import Http404
 from django.shortcuts import redirect
 from django.utils.translation import gettext as _
 from django.views.generic import TemplateView
 
 from pretalx.common.views.mixins import EventPermissionRequired
-from pretalx.orga.views.speaker import get_speaker_profiles_for_user
-from pretalx.submission.models import SubmissionStates
+from pretalx.person.domain.queries.profile import annotate_speaker_submission_counts
+from pretalx.submission.domain.queries.speaker import speakers_for_user
 
 from . import tagging, tickets
 from .models import TicketOverride
 
 logger = logging.getLogger(__name__)
+VIEW_PERMISSION = "person.orga_list_speakerprofile"
+CHANGE_PERMISSION = "submission.orga_update_submission"
 
 
 class TicketCheckView(EventPermissionRequired, TemplateView):
@@ -23,7 +24,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
     # fetches the table (?partial=1), which is the slow part that calls pretix.
     template_name = "pretalx_pretix_sso/tickets.html"
     partial_template_name = "pretalx_pretix_sso/_tickets_table.html"
-    permission_required = "orga.view_speakers"
+    permission_required = VIEW_PERMISSION
 
     @property
     def is_partial(self):
@@ -38,7 +39,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
         return super().dispatch(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        if not request.user.has_perm("orga.change_submissions", request.event):
+        if not request.user.has_perm(CHANGE_PERMISSION, request.event):
             raise Http404()
         action = request.POST.get("action")
         if action == "sync_tag":
@@ -56,9 +57,8 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
     def _set_override(self, request, enabled):
         event = request.event
         profile = (
-            get_speaker_profiles_for_user(request.user, event)
+            speakers_for_user(event, request.user)
             .filter(user__code=request.POST.get("user"))
-            .select_related("user")
             .first()
         )
         if not profile:
@@ -165,7 +165,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
         ctx["configured"] = not ctx["missing_settings"]
         ctx["pretix_event"] = tickets.pretix_event_slug(event)
         ctx["ticket_tag"] = tagging.TICKET_TAG
-        ctx["can_edit"] = self.request.user.has_perm("orga.change_submissions", event)
+        ctx["can_edit"] = self.request.user.has_perm(CHANGE_PERMISSION, event)
         ctx["only_accepted"] = self.request.GET.get("accepted") == "1"
         ctx["rows"] = []
         if not ctx["configured"]:
@@ -184,21 +184,16 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
             return ctx
 
         overridden = tagging.overridden_user_ids(event)
-        profiles = (
-            get_speaker_profiles_for_user(self.request.user, event)
-            .select_related("user", "user__pretix_customer")
-            .annotate(
-                accepted_count=Count(
-                    "user__submissions",
-                    filter=Q(user__submissions__event=event)
-                    & Q(user__submissions__state__in=SubmissionStates.accepted_states),
-                    distinct=True,
-                )
-            )
-            .order_by("-accepted_count", "user__name")
-        )
+        # Profiles without an account (user is None) are listed too: nothing
+        # can match them to a ticket, so they show as missing one
+        profiles = annotate_speaker_submission_counts(
+            speakers_for_user(event, self.request.user).select_related(
+                "user__pretix_customer"
+            ),
+            event=event,
+        ).order_by("-accepted_submission_count", "name", "user__name")
         for profile in profiles:
-            if ctx["only_accepted"] and not profile.accepted_count:
+            if ctx["only_accepted"] and not profile.accepted_submission_count:
                 continue
             ctx["rows"].append(
                 {
@@ -214,7 +209,7 @@ class TicketCheckView(EventPermissionRequired, TemplateView):
         ctx["missing_count"] = sum(
             1
             for row in ctx["rows"]
-            if not row["status"] and row["profile"].accepted_count
+            if not row["status"] and row["profile"].accepted_submission_count
         )
         return ctx
 

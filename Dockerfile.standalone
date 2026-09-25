@@ -1,0 +1,26 @@
+# pretalx with the pretix SSO plugin, built on the official image instead of
+# from the pretalx submodule.
+#   docker build -f Dockerfile.standalone -t pretalx-sso .
+#
+# PRETALX_VERSION must be in the range the plugin supports (see its
+# pyproject.toml). Keep it pinned: a newer pretalx migrates the database on
+# startup, and older images cannot run against it afterwards.
+ARG PRETALX_VERSION="v2026.2.1"
+FROM pretalx/standalone:${PRETALX_VERSION}
+
+USER root
+
+# --no-deps: never let pip swap the pretalx in the base image for a PyPI release;
+# the plugin's other dependency (requests) is no longer bundled with pretalx
+COPY plugins/pretalx-pretix-sso /plugins/pretalx-pretix-sso
+RUN pip3 install --no-cache-dir requests && \
+    pip3 install --no-cache-dir --no-deps /plugins/pretalx-pretix-sso
+
+# Pass the workers' output through to the container's stdout/stderr
+COPY deployment/docker/supervisord.conf /etc/supervisord.conf
+
+# The base image's static files are already built; only the plugin's need
+# collecting. Migrations run at startup (AUTOMIGRATE).
+USER pretalxuser
+RUN python3 -m pretalx collectstatic --noinput && \
+    rm -f /pretalx/src/pretalx.cfg /pretalx/src/data/.secret

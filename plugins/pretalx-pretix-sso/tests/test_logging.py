@@ -111,7 +111,7 @@ def test_organiser_actions_are_logged(
         tickets_page("post", data={"action": "sync_tag"})
     info = plugin_logs(logging.INFO)
     assert any(admin.code in m and "set the ticket override" in m and speaker.code in m for m in info)
-    assert any("started the needTicket tag sync" in m and admin.code in m for m in info)
+    assert any("started the needsTicket tag sync" in m and admin.code in m for m in info)
     # the speaker is covered by the override, so nothing needs the tag
     assert any("tag sync on event" in m and "added to 0" in m for m in info)
 
@@ -164,9 +164,9 @@ def test_sync_logs_go_to_stdout_once_and_not_stderr(
     assert len(result_lines) == 1, out
     # pretalx's log format: level, time, logger name, module, message
     assert re.match(
-        r"INFO \d{4}-\d\d-\d\d [\d:,]+ pretalx_pretix_sso\.tagging tagging needTicket", result_lines[0]
+        r"INFO \d{4}-\d\d-\d\d [\d:,]+ pretalx_pretix_sso\.tagging tagging needsTicket", result_lines[0]
     ), result_lines[0]
-    assert "Finished the needTicket tag sync" in out
+    assert "Finished the needsTicket tag sync" in out
     assert "pretalx_pretix_sso" not in err
 
 
@@ -192,6 +192,6 @@ def test_stdout_survives_celery_replacing_sys_stdout(capfd, monkeypatch):
     import io
 
     monkeypatch.setattr("sys.stdout", io.StringIO())  # what celery's worker does
-    logging.getLogger("pretalx_pretix_sso.tasks").info("Running the needTicket tag sync")
+    logging.getLogger("pretalx_pretix_sso.tasks").info("Running the needsTicket tag sync")
     out, _ = capfd.readouterr()
-    assert "Running the needTicket tag sync" in out
+    assert "Running the needsTicket tag sync" in out

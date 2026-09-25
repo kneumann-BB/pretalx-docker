@@ -8,6 +8,7 @@ import re
 import pytest
 from django.test import Client
 
+from pretalx.event.domain.plugins import disable_plugin
 from pretalx.person.models import User
 
 REGISTRATION = {
@@ -26,7 +27,9 @@ def client(event):
 
 
 def _sso_mode(html):
-    match = re.search(r'name="pretix-sso-login"[^>]*data-exclusive="(\w*)"', html)
+    # pretalx minifies its HTML, which reorders attributes and drops quotes
+    tag = re.search(r'<meta[^>]*name="?pretix-sso-login[">\s][^>]*>', html)
+    match = tag and re.search(r'data-exclusive="?(\w*)', tag.group(0))
     return match.group(1) if match else None
 
 
@@ -78,8 +81,7 @@ def test_registration_in_wizard_is_refused(client, event):
 
 
 def test_registration_allowed_when_plugin_disabled(client, event):
-    event.disable_plugin("pretalx_pretix_sso")
-    event.save()
+    disable_plugin(event, "pretalx_pretix_sso")
     html = client.get(f"/{event.slug}/login/", secure=True).content.decode()
     assert _sso_mode(html) is None
     client.post(f"/{event.slug}/login/", REGISTRATION, secure=True)

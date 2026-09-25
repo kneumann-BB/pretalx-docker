@@ -41,7 +41,7 @@ The organiser sidebar gets a "pretix tickets" page listing speakers and
 whether they hold a paid order in the pretix event with the same slug. Speakers
 are matched first by the pretix account they last logged in with (linked on
 each SSO login), then by order or attendee email. Organisers can mark a speaker
-as covered (e.g. a complimentary ticket), and sync a `needTicket` tag onto
+as covered (e.g. a complimentary ticket), and sync a `needsTicket` tag onto
 every proposal where no speaker is covered: all states and submission types,
 except drafts and deleted proposals. Only admission
 products count as tickets (not add-ons or merchandise), and a ticket belongs to
@@ -95,7 +95,7 @@ the repository root), so no secret has to live in a config file.
 The tests run against this source tree with a throwaway SQLite database; pretix
 is mocked. Test dependencies are pinned in `tests/requirements.txt`. CI
 (`.github/workflows/plugin-tests.yml`) builds the image and runs the suite on
-every push that touches the plugin, pretalx or the Dockerfile.
+every push that touches the plugin or `Dockerfile.standalone`.
 
 `tests/test_restrict.py` goes through pretalx's full request stack, so run the
 suite after every pretalx upgrade: it is what notices when the patched pretalx

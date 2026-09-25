@@ -230,12 +230,12 @@ def test_background_sync_logs_its_lifecycle(tickets_page, worker, pretix, speake
     worker.run()
     logs = _sync_logs(caplog)
     order = [
-        f"User {admin.code} started the needTicket tag sync",
-        "Queued the needTicket tag sync",
+        f"User {admin.code} started the needsTicket tag sync",
+        "Queued the needsTicket tag sync",
         "one is already running",
-        f"Running the needTicket tag sync for event test, requested by user {admin.code}",
-        "needTicket tag sync on event test: added to 1",
-        "Finished the needTicket tag sync for event test in",
+        f"Running the needsTicket tag sync for event test, requested by user {admin.code}",
+        "needsTicket tag sync on event test: added to 1",
+        "Finished the needsTicket tag sync for event test in",
     ]
     positions = [next(i for i, m in enumerate(logs) if text in m) for text in order]
     assert positions == sorted(positions), logs
@@ -263,7 +263,7 @@ def test_failed_background_sync_is_logged_and_shown(
     else:
         worker.run()
     log = ActivityLog.objects.get(action_type=tagging.SYNC_FAILED_ACTION)
-    assert log.person == admin and log.json_data == {"tag": "needTicket", "reason": reason}
+    assert log.person == admin and log.json_data == {"tag": "needsTicket", "reason": reason}
     assert shown in str(log.display)
     assert any("tag sync for event test failed after" in m for m in _sync_logs(caplog))
     assert not tickets.job_running(event, "sync")

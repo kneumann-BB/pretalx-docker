@@ -11,6 +11,7 @@ from pretalx.common.signals import activitylog_display
 from pretalx.orga.signals import nav_event
 
 from .oidc import is_configured
+from .orga_views import VIEW_PERMISSION
 
 LOGIN_URL_NAMES = {"event.login"}
 
@@ -53,7 +54,7 @@ def add_login_button(sender, request, **kwargs):
 
 @receiver(nav_event, dispatch_uid="pretix_sso_nav_event")
 def add_tickets_nav(sender, request, **kwargs):
-    if not request.user.has_perm("orga.view_speakers", sender):
+    if not request.user.has_perm(VIEW_PERMISSION, sender):
         return []
     url = reverse("plugins:pretalx_pretix_sso:tickets", kwargs={"event": sender.slug})
     return [
@@ -87,7 +88,7 @@ def display_log_entry(sender, activitylog, **kwargs):
             'The "{tag}" tag was synced with pretix tickets: added to {added}, '
             "removed from {removed} proposals."
         ).format(
-            tag=data.get("tag", "needTicket"),
+            tag=data.get("tag", "needsTicket"),
             added=data.get("added", 0),
             removed=data.get("removed", 0),
         )
@@ -97,11 +98,11 @@ def display_log_entry(sender, activitylog, **kwargs):
             return gettext(
                 'The "{tag}" tag sync failed: pretix could not be reached or returned '
                 "unexpected data. No tags were changed."
-            ).format(tag=data.get("tag", "needTicket"))
+            ).format(tag=data.get("tag", "needsTicket"))
         return gettext(
             'The "{tag}" tag sync failed because of an unexpected error. Details are '
             "in the server log."
-        ).format(tag=data.get("tag", "needTicket"))
+        ).format(tag=data.get("tag", "needsTicket"))
     if action == "pretalx_pretix_sso.account.linked":
         if (activitylog.json_data or {}).get("password_disabled"):
             return gettext(

@@ -78,14 +78,14 @@
             <tbody>
                 {% for row in rows %}
                     <tr>
-                        <td><a href="{{ row.profile.orga_urls.base }}">{{ row.profile.user.get_display_name }}</a></td>
+                        <td><a href="{{ row.profile.orga_urls.base }}">{{ row.profile.get_display_name }}</a></td>
                         <td>
                             {{ row.profile.user.email }}
                             {% if row.linked %}
                                 <i class="fa fa-link text-muted" title="{% translate "Linked to a pretix account" %}"></i>
                             {% endif %}
                         </td>
-                        <td>{{ row.profile.accepted_count }}</td>
+                        <td>{{ row.profile.accepted_submission_count }}</td>
                         <td>
                             {% if row.status == "account" %}
                                 <span class="badge color-success" title="{% translate "Paid order placed with their pretix account" %}"><i class="fa fa-check"></i> {% translate "Paid" %}</span>
@@ -99,6 +99,8 @@
                         </td>
                         {% if can_edit %}
                             <td class="text-right">
+                                {# Overrides belong to an account, so profiles without one get none #}
+                                {% if row.profile.user %}
                                 <form method="post">
                                     {% csrf_token %}
                                     <input type="hidden" name="user" value="{{ row.profile.user.code }}">
@@ -113,6 +115,7 @@
                                         </button>
                                     {% endif %}
                                 </form>
+                                {% endif %}
                             </td>
                         {% endif %}
                     </tr>

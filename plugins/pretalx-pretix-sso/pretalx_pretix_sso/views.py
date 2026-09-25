@@ -1,4 +1,3 @@
-import json
 import logging
 import secrets
 
@@ -6,6 +5,7 @@ import requests
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import Http404
 from django.shortcuts import redirect
@@ -46,7 +46,7 @@ def _log_account_event(event, user, action, **data):
         person=user,
         content_object=user,
         action_type=f"pretalx_pretix_sso.account.{action}",
-        data=json.dumps(data) if data else None,
+        data=data or None,
         is_orga_action=False,
     )
 
@@ -156,8 +156,18 @@ class CallbackView(View):
                         locale=getattr(request, "LANGUAGE_CODE", event.locale),
                         timezone=event.timezone,
                     )
+                    # Without a password, pretalx sets a random one plus a
+                    # reset token for invitations. SSO accounts have neither.
+                    user.set_unusable_password()
+                    user.pw_reset_token = None
+                    user.pw_reset_time = None
+                    user.save(
+                        update_fields=["password", "pw_reset_token", "pw_reset_time"]
+                    )
                 created = True
-            except IntegrityError:
+            # pretalx checks email uniqueness before saving (ValidationError);
+            # the database constraint catches a race past that (IntegrityError)
+            except (IntegrityError, ValidationError):
                 # A concurrent callback created the account first
                 user = User.objects.filter(email__iexact=email).first()
                 if not user:

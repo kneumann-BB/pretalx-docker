@@ -1,6 +1,6 @@
 services:
   pretalx:
-    image: pretalx-sso:latest
+    image: 071025944660.dkr.ecr.us-east-1.amazonaws.com/pretalx:latest
     # image: pretalx/dev
     # build: .
     container_name: pretalx

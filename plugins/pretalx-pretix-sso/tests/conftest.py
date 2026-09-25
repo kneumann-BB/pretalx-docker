@@ -30,20 +30,23 @@ def _isolation(db):
 
 @pytest.fixture
 def event():
-    from pretalx.event.models import Event, Organiser
+    from pretalx.event.domain.event import create_event
+    from pretalx.event.domain.plugins import enable_plugin
+    from pretalx.event.models import Organiser
 
     organiser = Organiser.objects.create(name="Org", slug="org")
     today = dt.date.today()
-    event = Event.objects.create(
+    # create_event also sets up the CfP, which the login and wizard pages need
+    event = create_event(
         organiser=organiser,
+        locales=["en"],
         name="Test",
         slug="test",
         date_from=today,
         date_to=today,
         email="orga@example.invalid",
     )
-    event.enable_plugin("pretalx_pretix_sso")
-    event.save()
+    enable_plugin(event, "pretalx_pretix_sso")
     return event
 
 
@@ -76,13 +79,14 @@ def make_proposal(event):
     from pretalx.submission.models import Submission
 
     def make(title, state, *speakers):
+        """``speakers`` are users; proposals list their event speaker profiles."""
         submission = Submission.objects.create(
             event=event,
             title=title,
             state=state,
             submission_type=event.cfp.default_type,
         )
-        submission.speakers.add(*speakers)
+        submission.speakers.add(*(user.get_speaker(event=event) for user in speakers))
         return submission
 
     return make

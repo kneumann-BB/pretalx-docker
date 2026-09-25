@@ -38,4 +38,7 @@ STORAGES = {
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+# pretalx keeps sessions in a separate Redis cache by default
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]

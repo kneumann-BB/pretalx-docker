@@ -45,7 +45,10 @@ class TicketHolders:
         return email_hash(email) in self.email_hashes
 
     def status(self, user, overridden=False):
-        """Return how ``user`` is covered, or None if they are not."""
+        """Return how ``user`` is covered, or None if they are not. ``user`` is
+        None for a speaker profile without an account, which is never covered."""
+        if user is None:
+            return None
         if customer_identifier(user) in self.customers:
             return PAID_ACCOUNT
         if self.has_email(user.email):

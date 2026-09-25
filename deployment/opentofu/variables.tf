@@ -179,9 +179,9 @@ variable "postgres_instance_class" {
 }
 
 variable "postgres_allocated_storage" {
-  description = "Allocated storage in GiB for PostgreSQL."
+  description = "Allocated storage in GiB for PostgreSQL. RDS can grow storage but never shrink it."
   type        = number
-  default     = 20
+  default     = 30
 }
 
 variable "postgres_engine_version" {

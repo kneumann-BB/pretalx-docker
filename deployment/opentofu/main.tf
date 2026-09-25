@@ -26,6 +26,14 @@ locals {
         listen 80;
         server_name _;
 
+        # Container health check: answers without touching pretalx
+        location = /nginx-health {
+            access_log off;
+            allow 127.0.0.1;
+            deny all;
+            return 200;
+        }
+
         location / {
             proxy_pass http://127.0.0.1:8346/;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -67,6 +75,41 @@ locals {
       event_map     = join(", ", [for k, v in var.pretix_event_map : "${k}=${v}"])
     }
   })
+
+  # Container health checks. pretalx-web fetches the start page straight from
+  # gunicorn: unlike /orga/login/ it queries events, so a broken schema or
+  # database fails it and the deployment circuit breaker rolls back.
+  # startPeriod covers the migrations run on startup (300 is the ECS maximum).
+  web_health_check = {
+    command = ["CMD", "python3", "-c", <<-EOT
+      import urllib.request
+      req = urllib.request.Request("http://127.0.0.1:8346/", headers={"Host": "${var.domain_name}", "X-Forwarded-Proto": "https"})
+      urllib.request.urlopen(req, timeout=8)
+    EOT
+    ]
+    interval    = 30
+    timeout     = 10
+    retries     = 3
+    startPeriod = 300
+  }
+
+  nginx_health_check = {
+    command     = ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+    interval    = 30
+    timeout     = 5
+    retries     = 3
+    startPeriod = 10
+  }
+
+  # Pings only this container's Celery node, which checks it is running and
+  # connected to Redis. Loading the app is slow on small tasks, hence the timeout.
+  worker_health_check = {
+    command     = ["CMD-SHELL", "celery -A pretalx.celery_app inspect ping --timeout 10 -d \"celery@$(hostname)\" > /dev/null"]
+    interval    = 60
+    timeout     = 30
+    retries     = 3
+    startPeriod = 120
+  }
 
   common_mount_points = [
     {
@@ -617,11 +660,12 @@ resource "aws_ecs_task_definition" "web" {
   container_definitions = jsonencode([
     local.bootstrap_container,
     {
-      name      = "pretalx-web"
-      image     = local.app_image
-      essential = true
-      command   = ["webworker"]
-      dependsOn = [{ containerName = "bootstrap", condition = "SUCCESS" }]
+      name        = "pretalx-web"
+      image       = local.app_image
+      essential   = true
+      command     = ["webworker"]
+      dependsOn   = [{ containerName = "bootstrap", condition = "SUCCESS" }]
+      healthCheck = local.web_health_check
       environment = [
         { name = "PRETALX_FILESYSTEM_MEDIA", value = "/public/media" },
         { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },
@@ -649,7 +693,13 @@ resource "aws_ecs_task_definition" "web" {
       command = [
         "printf '%s' \"$NGINX_CONFIG\" > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"
       ]
-      dependsOn = [{ containerName = "bootstrap", condition = "SUCCESS" }]
+      # Start only once pretalx is up (migrations done), so the load balancer
+      # never sees 502s from a task that is still starting.
+      dependsOn = [
+        { containerName = "bootstrap", condition = "SUCCESS" },
+        { containerName = "pretalx-web", condition = "HEALTHY" },
+      ]
+      healthCheck = local.nginx_health_check
       environment = [
         { name = "NGINX_CONFIG", value = local.nginx_config },
       ]
@@ -740,11 +790,12 @@ resource "aws_ecs_task_definition" "worker" {
   container_definitions = jsonencode([
     local.bootstrap_container,
     {
-      name      = "pretalx-worker"
-      image     = local.app_image
-      essential = true
-      command   = ["taskworker"]
-      dependsOn = [{ containerName = "bootstrap", condition = "SUCCESS" }]
+      name        = "pretalx-worker"
+      image       = local.app_image
+      essential   = true
+      command     = ["taskworker"]
+      dependsOn   = [{ containerName = "bootstrap", condition = "SUCCESS" }]
+      healthCheck = local.worker_health_check
       environment = [
         { name = "PRETALX_FILESYSTEM_MEDIA", value = "/public/media" },
         { name = "PRETALX_FILESYSTEM_STATIC", value = "/pretalx/src/static.dist" },

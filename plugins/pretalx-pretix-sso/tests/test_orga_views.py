@@ -5,6 +5,7 @@ import requests
 from django.http import Http404
 
 from pretalx.common.models import ActivityLog
+from pretalx.event.domain.plugins import disable_plugin
 from pretalx_pretix_sso import tickets
 from pretalx_pretix_sso.models import PretixCustomer, TicketOverride
 
@@ -22,7 +23,7 @@ def pretix():
 
 
 def _tagged(event):
-    tag = event.tags.filter(tag="needTicket").first()
+    tag = event.tags.filter(tag="needsTicket").first()
     return set(tag.submissions.values_list("title", flat=True)) if tag else set()
 
 
@@ -47,6 +48,25 @@ def test_table_partial_shows_statuses(tickets_page, pretix, make_speaker, make_p
     html = response.content.decode()
     assert "<html" not in html
     assert "Paid (email)" in html and "fa-link" in html and "Mark as covered" in html
+
+
+def test_speaker_without_account_needs_a_ticket(tickets_page, pretix, event):
+    from pretalx.person.models import SpeakerProfile
+    from pretalx.submission.models import Submission
+
+    guest = SpeakerProfile.objects.create(event=event, name="Guest Speaker")
+    talk = Submission.objects.create(
+        event=event, title="Guest talk", state="accepted",
+        submission_type=event.cfp.default_type,
+    )
+    talk.speakers.add(guest)
+    response, _ = tickets_page(query="?partial=1")
+    html = response.content.decode()
+    # listed as missing a ticket, without an override (overrides need an account)
+    assert "Guest Speaker" in html and "Mark as covered" not in html
+    assert "1 speaker with an accepted proposal has no ticket." in " ".join(html.split())
+    tickets_page("post", data={"action": "sync_tag"})
+    assert _tagged(event) == {"Guest talk"}
 
 
 @pytest.mark.parametrize(
@@ -147,22 +167,9 @@ def test_actions_need_change_permission(tickets_page, event, make_speaker):
 
 
 def test_page_404_when_plugin_disabled(tickets_page, event):
-    event.disable_plugin("pretalx_pretix_sso")
-    event.save()
+    disable_plugin(event, "pretalx_pretix_sso")
     with pytest.raises(Http404):
         tickets_page()
-
-
-def test_sync_survives_duplicate_tags(tickets_page, pretix, event, make_speaker, make_proposal):
-    from pretalx.submission.models import Tag
-
-    oldest = Tag.objects.create(event=event, tag="needTicket", color="#b23e65")
-    duplicate = Tag.objects.create(event=event, tag="needTicket", color="#000000")
-    make_proposal("Uncovered", "accepted", make_speaker("nobody@example.invalid"))
-    _, messages = tickets_page("post", data={"action": "sync_tag"})
-    assert "added to 1" in messages[-1]
-    assert set(oldest.submissions.values_list("title", flat=True)) == {"Uncovered"}
-    assert not duplicate.submissions.exists()
 
 
 def test_missing_count_only_includes_accepted_speakers(
@@ -186,7 +193,7 @@ def test_activity_log_entries_are_readable(tickets_page, pretix, event, make_spe
     assert not any(text.startswith("pretalx_pretix_sso.") for text in shown), shown
     assert any("marked as covered" in text for text in shown)
     assert any("override was removed" in text for text in shown)
-    assert any('"needTicket" tag was synced' in text and "added to 1" in text for text in shown)
+    assert any('"needsTicket" tag was synced' in text and "added to 1" in text for text in shown)
 
 
 def test_unconfigured_page_names_missing_settings(tickets_page, monkeypatch):
@@ -195,3 +202,25 @@ def test_unconfigured_page_names_missing_settings(tickets_page, monkeypatch):
     html = response.content.decode()
     assert "<code>organizer</code>" in html and "own domain" in html
     assert "<code>api_token</code>" not in html  # the token is configured
+
+
+def test_nav_links_to_tickets_page_for_organisers(event, admin, make_speaker):
+    from django.test import Client
+
+    from pretalx.event.models import Team
+
+    tickets_url = f"/orga/event/{event.slug}/p/pretix-tickets/"
+    client = Client(HTTP_HOST="pretalx.example.invalid")
+    client.force_login(admin)
+    html = client.get(f"/orga/event/{event.slug}/", secure=True).content.decode()
+    assert tickets_url in html
+    # a team member who cannot see speakers gets no link
+    member = make_speaker("member@example.invalid")
+    team = Team.objects.create(
+        organiser=event.organiser, name="Settings only", all_events=True,
+        can_change_event_settings=True, can_change_submissions=False,
+    )
+    team.members.add(member)
+    client.force_login(member)
+    html = client.get(f"/orga/event/{event.slug}/", secure=True).content.decode()
+    assert tickets_url not in html

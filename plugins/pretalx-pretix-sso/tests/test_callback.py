@@ -5,6 +5,7 @@ from django.db import IntegrityError
 from django.http import Http404
 
 from conftest import _prepare
+from pretalx.event.domain.plugins import disable_plugin
 from pretalx.person.models import User
 from pretalx_pretix_sso import views
 from pretalx_pretix_sso.models import PretixCustomer
@@ -27,6 +28,8 @@ def test_new_user_is_created_linked_and_logged_in(sso_callback, event):
     assert request.user == user
     assert user.name == "New Person"
     assert not user.has_usable_password()
+    # pretalx gives passwordless accounts an invitation reset token; SSO ones get none
+    assert user.pw_reset_token is None
     assert PretixCustomer.objects.get(user=user).identifier == "CUST1"
     assert response.url == event.urls.user_submissions
     # the token exchange used the configured redirect URI
@@ -137,8 +140,7 @@ def test_callback_without_session_is_404(rf):
 
 
 def test_callback_for_disabled_plugin_is_404(sso_callback, event):
-    event.disable_plugin("pretalx_pretix_sso")
-    event.save()
+    disable_plugin(event, "pretalx_pretix_sso")
     with pytest.raises(Http404):
         sso_callback(_userinfo())
 
@@ -231,8 +233,7 @@ def test_stale_callback_without_known_event_is_404(event, slug):
 
 
 def test_stale_callback_for_disabled_plugin_is_404(event):
-    event.disable_plugin("pretalx_pretix_sso")
-    event.save()
+    disable_plugin(event, "pretalx_pretix_sso")
     with pytest.raises(Http404):
         _stale_callback(event.slug)
 

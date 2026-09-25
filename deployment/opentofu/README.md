@@ -79,7 +79,7 @@ State is stored in S3 with S3-native locking (`use_lockfile`, via a `.tflock` ob
 
 ## Cost defaults
 
-Defaults are sized for a small deployment: ARM64 Fargate tasks (0.5 vCPU / 1 GiB web and worker), `db.t4g.micro` with 20 GiB gp3, `cache.t4g.micro`, no NAT gateway, Container Insights off, 14-day log retention, and an ECR lifecycle policy. For production, consider `nat_gateway_enabled = true`, `worker_use_fargate_spot = false`, and larger instance classes. The image must be built for `linux/arm64` unless you set `container_cpu_architecture = "X86_64"`.
+Defaults are sized for a small deployment: ARM64 Fargate tasks (0.5 vCPU / 1 GiB web and worker), `db.t4g.micro` with 30 GiB gp3, `cache.t4g.micro`, no NAT gateway, Container Insights off, 14-day log retention, and an ECR lifecycle policy. For production, consider `nat_gateway_enabled = true`, `worker_use_fargate_spot = false`, and larger instance classes. The image must be built for `linux/arm64` unless you set `container_cpu_architecture = "X86_64"`.
 
 ## pretix SSO plugin
 

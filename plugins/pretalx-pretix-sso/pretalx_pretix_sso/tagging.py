@@ -1,4 +1,4 @@
-"""Keep the needTicket tag on the proposals whose speakers have no ticket."""
+"""Keep the needsTicket tag on the proposals whose speakers have no ticket."""
 
 import logging
 
@@ -10,7 +10,7 @@ from pretalx.submission.models import Tag
 from .models import TicketOverride
 
 logger = logging.getLogger(__name__)
-TICKET_TAG = "needTicket"
+TICKET_TAG = "needsTicket"
 SYNC_ACTION = "pretalx_pretix_sso.tag.synced"
 SYNC_FAILED_ACTION = "pretalx_pretix_sso.tag.sync_failed"
 # Why a sync failed, as stored in the activity log
@@ -19,19 +19,12 @@ FAILED_ERROR = "error"  # anything else; details are in the server log
 
 
 def ticket_tag(event):
-    """The event's needTicket tag, created if missing. pretalx does not enforce
-    unique tag names, so if duplicates exist the oldest one is used."""
-    tags = list(Tag.objects.filter(event=event, tag=TICKET_TAG).order_by("pk"))
-    if len(tags) > 1:
-        logger.warning(
-            "Event %s has %d %r tags; syncing the oldest",
-            event.slug,
-            len(tags),
-            TICKET_TAG,
-        )
-    return tags[0] if tags else Tag.objects.create(
-        event=event, tag=TICKET_TAG, color="#b23e65"
+    """The event's needsTicket tag, created if missing (tag names are unique
+    per event)."""
+    tag, _created = Tag.objects.get_or_create(
+        event=event, tag=TICKET_TAG, defaults={"color": "#b23e65"}
     )
+    return tag
 
 
 def overridden_user_ids(event):
@@ -48,13 +41,16 @@ def sync_ticket_tag(event, holders, user):
     with transaction.atomic():
         tag = ticket_tag(event)
         tagged = set(tag.submissions.values_list("pk", flat=True))
-        submissions = event.submissions.prefetch_related("speakers__pretix_customer")
+        # Speakers are SpeakerProfiles; tickets and overrides belong to their user
+        submissions = event.submissions.prefetch_related(
+            "speakers__user__pretix_customer"
+        )
         # Every proposal in any state and of any submission type (pretalx
         # already leaves out drafts and deleted ones) needs a ticket until
         # any of its speakers is covered
         for submission in submissions:
             needs_ticket = not any(
-                holders.status(speaker, speaker.pk in overridden)
+                holders.status(speaker.user, speaker.user_id in overridden)
                 for speaker in submission.speakers.all()
             )
             if needs_ticket and submission.pk not in tagged:

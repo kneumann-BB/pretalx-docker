@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from pretalx.event.domain.plugins import disable_plugin
 from pretalx_pretix_sso import oidc
 
 ISSUER = "https://pretix.example.invalid/org"
@@ -108,8 +109,7 @@ def test_event_map_parsing(settings, monkeypatch):
 
 def test_is_enabled_requires_plugin_on_event(event):
     assert oidc.is_enabled(event)
-    event.disable_plugin("pretalx_pretix_sso")
-    event.save()
+    disable_plugin(event, "pretalx_pretix_sso")
     assert not oidc.is_enabled(event)
 
 

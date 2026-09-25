@@ -5,15 +5,13 @@ on:
   push:
     paths:
       - 'plugins/**'
-      - 'pretalx'
-      - 'Dockerfile'
+      - 'Dockerfile.standalone'
       - 'deployment/docker/**'
       - '.github/workflows/plugin-tests.yml'
   pull_request:
     paths:
       - 'plugins/**'
-      - 'pretalx'
-      - 'Dockerfile'
+      - 'Dockerfile.standalone'
       - 'deployment/docker/**'
       - '.github/workflows/plugin-tests.yml'
 
@@ -40,6 +38,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.standalone
           platforms: linux/amd64
           load: true
           push: false
