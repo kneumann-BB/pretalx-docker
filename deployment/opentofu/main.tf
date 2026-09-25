@@ -62,6 +62,8 @@ locals {
       client_id     = var.pretix_sso_client_id
       client_secret = var.pretix_sso_client_secret
       api_token     = var.pretix_api_token
+      pretix_url    = var.pretix_url
+      organizer     = var.pretix_organizer
       event_map     = join(", ", [for k, v in var.pretix_event_map : "${k}=${v}"])
     }
   })
@@ -90,6 +92,11 @@ locals {
     essential  = false
     entryPoint = ["/bin/bash", "-ec"]
     command    = [local.bootstrap_script]
+    # The config is read from Secrets Manager only at task start; changing this
+    # hash makes a config change roll out new tasks.
+    environment = [
+      { name = "PRETALX_CONFIG_SHA256", value = sha256(local.pretalx_config) },
+    ]
     secrets = [
       {
         name      = "PRETALX_CONFIG"
@@ -549,7 +556,10 @@ resource "aws_route53_record" "pretalx" {
 }
 
 resource "aws_ecs_task_definition" "web" {
-  family                   = "${local.identifier}-web"
+  family = "${local.identifier}-web"
+  # New tasks must read the updated config secret, not the previous version.
+  depends_on = [aws_secretsmanager_secret_version.pretalx_config]
+
   cpu                      = tostring(var.web_task_cpu)
   memory                   = tostring(var.web_task_memory)
   network_mode             = "awsvpc"
@@ -669,7 +679,10 @@ resource "aws_ecs_task_definition" "web" {
 }
 
 resource "aws_ecs_task_definition" "worker" {
-  family                   = "${local.identifier}-worker"
+  family = "${local.identifier}-worker"
+  # New tasks must read the updated config secret, not the previous version.
+  depends_on = [aws_secretsmanager_secret_version.pretalx_config]
+
   cpu                      = tostring(var.worker_task_cpu)
   memory                   = tostring(var.worker_task_memory)
   network_mode             = "awsvpc"
@@ -753,7 +766,10 @@ resource "aws_ecs_task_definition" "worker" {
 }
 
 resource "aws_ecs_task_definition" "cron" {
-  family                   = "${local.identifier}-cron"
+  family = "${local.identifier}-cron"
+  # New tasks must read the updated config secret, not the previous version.
+  depends_on = [aws_secretsmanager_secret_version.pretalx_config]
+
   cpu                      = tostring(var.cron_task_cpu)
   memory                   = tostring(var.cron_task_memory)
   network_mode             = "awsvpc"
@@ -873,6 +889,8 @@ resource "aws_ecs_service" "worker" {
   desired_count          = var.worker_desired_count
   platform_version       = "LATEST"
   enable_execute_command = true
+  # Required by the provider to change capacity_provider_strategy in place.
+  force_new_deployment = true
 
   capacity_provider_strategy {
     capacity_provider = var.worker_use_fargate_spot ? "FARGATE_SPOT" : "FARGATE"

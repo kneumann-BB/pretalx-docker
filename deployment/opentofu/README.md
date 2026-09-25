@@ -81,6 +81,10 @@ State is stored in S3 with S3-native locking (`use_lockfile`, via a `.tflock` ob
 
 Defaults are sized for a small deployment: ARM64 Fargate tasks (0.5 vCPU / 1 GiB web and worker), `db.t4g.micro` with 20 GiB gp3, `cache.t4g.micro`, no NAT gateway, Container Insights off, 14-day log retention, and an ECR lifecycle policy. For production, consider `nat_gateway_enabled = true`, `worker_use_fargate_spot = false`, and larger instance classes. The image must be built for `linux/arm64` unless you set `container_cpu_architecture = "X86_64"`.
 
+## pretix SSO plugin
+
+Set `pretix_sso_issuer` (the pretix organizer URL, e.g. `https://pretix.eu/myorg`), `pretix_sso_client_id` and `pretix_sso_client_secret` to enable the `[plugin:pretalx_pretix_sso]` section. For the ticket check, also set `pretix_api_token`, plus `pretix_url` and `pretix_organizer` if the organizer has its own domain, and `pretix_event_map` if event slugs differ. The pretix SSO client's redirect URI is `https://<domain_name>/p/pretix-sso/callback/`. Changing any of these rolls out new web, worker and cron tasks so they pick up the new config. Enable the plugin per event in pretalx.
+
 ## Bootstrap behavior
 
 The ECS task definitions include a short bootstrap container that:

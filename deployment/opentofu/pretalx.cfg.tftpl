@@ -40,6 +40,12 @@ client_secret = ${pretix_sso.client_secret}
 %{ if pretix_sso.api_token != "" ~}
 api_token = ${pretix_sso.api_token}
 %{ endif ~}
+%{ if pretix_sso.pretix_url != "" ~}
+pretix_url = ${pretix_sso.pretix_url}
+%{ endif ~}
+%{ if pretix_sso.organizer != "" ~}
+organizer = ${pretix_sso.organizer}
+%{ endif ~}
 %{ if pretix_sso.event_map != "" ~}
 event_map = ${pretix_sso.event_map}
 %{ endif ~}

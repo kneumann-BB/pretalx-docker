@@ -333,6 +333,11 @@ variable "pretix_sso_client_id" {
   description = "Client ID of the pretix SSO client (Organizer > Customer accounts > SSO clients)."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.pretix_sso_issuer == "" || var.pretix_sso_client_id != ""
+    error_message = "pretix_sso_client_id is required when pretix_sso_issuer is set."
+  }
 }
 
 variable "pretix_sso_client_secret" {
@@ -340,6 +345,11 @@ variable "pretix_sso_client_secret" {
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.pretix_sso_issuer == "" || var.pretix_sso_client_secret != ""
+    error_message = "pretix_sso_client_secret is required when pretix_sso_issuer is set."
+  }
 }
 
 variable "pretix_api_token" {
@@ -347,6 +357,18 @@ variable "pretix_api_token" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "pretix_url" {
+  description = "pretix base URL for the ticket check API. Derived from pretix_sso_issuer when empty."
+  type        = string
+  default     = ""
+}
+
+variable "pretix_organizer" {
+  description = "pretix organizer slug for the ticket check API. Derived from the pretix_sso_issuer path when empty; set it when the organizer has its own domain."
+  type        = string
+  default     = ""
 }
 
 variable "pretix_event_map" {
